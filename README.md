@@ -14,7 +14,8 @@ FAILURE RISK! **
 TBD
 
 #### Setting up the virtual environment
-TBD
+```python -m venv venv```
+```pip install -r requirements.txt```
 
 #### Connecting to your server
 
