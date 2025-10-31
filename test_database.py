@@ -51,8 +51,8 @@ class TestDatabase(unittest.TestCase):
             name="Disco Ninjas",
             year=2025,
             season="Fall",
-            home_color="purple",
-            away_color="black"
+            home_colour="purple",
+            away_colour="black"
         )
         
         self.ultimate_warriors = create_team(
@@ -60,8 +60,8 @@ class TestDatabase(unittest.TestCase):
             name="Ultimate Warriors",
             year=2025,
             season="Fall",
-            home_color="blue",
-            away_color="white"
+            home_colour="blue",
+            away_colour="white"
         )
         
         self.flying_squirrels = create_team(
@@ -69,8 +69,8 @@ class TestDatabase(unittest.TestCase):
             name="Flying Squirrels",
             year=2025,
             season="Fall",
-            home_color="brown",
-            away_color="green"
+            home_colour="brown",
+            away_colour="green"
         )
         
         self.cosmic_rays = create_team(
@@ -78,18 +78,18 @@ class TestDatabase(unittest.TestCase):
             name="Cosmic Rays",
             year=2025,
             season="Fall",
-            home_color="yellow",
-            away_color="orange"
+            home_colour="yellow",
+            away_colour="orange"
         )
 
         # Create six players
         self.players = [
-            create_player(self.session, "Alice", "Johnson", Genders.FEMALE_MATCHING, "alice#1234"),
-            create_player(self.session, "Bob", "Smith", Genders.MALE_MATCHING, "bob#5678"),
-            create_player(self.session, "Carol", "Davis", Genders.FEMALE_MATCHING, "carol#9012"),
-            create_player(self.session, "David", "Wilson", Genders.MALE_MATCHING, "david#3456"),
-            create_player(self.session, "Eve", "Brown", Genders.FEMALE_MATCHING, "eve#7890"),
-            create_player(self.session, "Frank", "Miller", Genders.MALE_MATCHING, "frank#1234")
+            create_player(self.session, "Alice", "Johnson", "f", "alice#1234"),
+            create_player(self.session, "Bob", "Smith", "m", "bob#5678"),
+            create_player(self.session, "Carol", "Davis", "f", "carol#9012"),
+            create_player(self.session, "David", "Wilson", "m", "david#3456"),
+            create_player(self.session, "Eve", "Brown", "f", "eve#7890"),
+            create_player(self.session, "Frank", "Miller", "m", "frank#1234")
         ]
         
         # Add players to Cosmic Rays team
@@ -144,7 +144,7 @@ class TestDatabase(unittest.TestCase):
             print(f"    Found {len(teams)} teams in the database")
             for team in teams:
                 print(f"  {team.id}: {team.name} ({team.year} {team.season})")
-                print(f"     Colors: {team.home_color}/{team.away_color}")
+                print(f"     Colours: {team.home_colour}/{team.away_colour}")
                 print(f"     Players: {len(team.players)}")
             
             # Display Players
@@ -319,23 +319,7 @@ class TestDatabase(unittest.TestCase):
         existing_attendance = self.session.query(Attendance)\
             .filter_by(game_id=game.id)\
             .all()
-            
-        if not existing_attendance:
-            for player in self.players:
-                attendance = Attendance(
-                    player=player,
-                    game=game,
-                    status=AttendanceStatus.PENDING
-                )
-                self.session.add(attendance)
-            self.session.commit()
-        else:
-            # Reset all to PENDING
-            self.session.query(Attendance)\
-                .filter_by(game_id=game.id)\
-                .update({Attendance.status: AttendanceStatus.PENDING})
-            self.session.commit()
-        
+
         print("\nInitial state:")
         self.display_attendance_summary(game)
         
@@ -378,7 +362,7 @@ class TestDatabase(unittest.TestCase):
             self.session,
             "George",
             "Wallis",
-            Genders.MALE_MATCHING,
+            "m",
             "george#4567"
         )
         add_player_to_team(self.session, self.cosmic_rays.id, george)

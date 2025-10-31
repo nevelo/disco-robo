@@ -4,9 +4,10 @@ from sqlalchemy.orm import Session
 from models import Team, Player, Game, Attendance, AttendanceStatus, Genders
 
 # Constants for unknown/placeholder values
-UNKNOWN_DISCORD = "pending_discord"
+UNKNOWN_DISCORD = "pending_discord"  # Local constant used by both disco-robo.py and this module
 UNKNOWN_NAME = "Unknown Player"
 
+# Delete a team and all its relationships.
 def delete_team(
     session: Session,
     team: Team
@@ -26,16 +27,16 @@ def create_team(
     name: str,
     year: int,
     season: str,
-    home_color: str = "white",
-    away_color: str = "black"
+    home_colour: str = "white",
+    away_colour: str = "black"
 ) -> Team:
     """Create a new team."""
     team = Team(
         name=name,
         year=year,
         season=season,
-        home_color=home_color,
-        away_color=away_color
+        home_colour=home_colour,
+        away_colour=away_colour
     )
     session.add(team)
     session.commit()
@@ -126,7 +127,7 @@ def create_game(
     park: str,
     field: int
 ) -> Game:
-    """Create a new game and initialize attendance records for all players on both teams.
+    """Create a new game.
     
     Args:
         session: SQLAlchemy session
@@ -189,7 +190,6 @@ def set_attendance_status(
         game_id: ID of the game
         player_id: ID of the player
         status: New attendance status
-        notes: Optional notes about the attendance status
         
     Returns:
         The updated or created Attendance record
@@ -320,6 +320,7 @@ def get_player_by_discord(
 def get_game_attendance(
     session: Session,
     game_id: int,
+    team_id: int = -1,
     include_details: bool = False
 ) -> dict:
     """Get attendance status for a game, grouped by status.
@@ -340,43 +341,45 @@ def get_game_attendance(
     if not game:
         raise ValueError(f"Game with ID {game_id} not found")
 
-    # Get all attendance records for this game
-    attendances = session.query(Attendance).filter_by(game_id=game_id).all()
-    
+    # initialize results structure    
     result = {
         "attending": [],
         "not_attending": [],
         "pending": []
     }
 
-    for attendance in attendances:
-        if include_details:
-            item = attendance
-        else:
-            item = attendance.player
+    # Get all players from both teams
+    players = []
+    teams = [game.hometeam, game.awayteam] if team_id == -1 else [team for team in [game.hometeam, game.awayteam] if team.id == team_id]
+    if not teams:
+        raise ValueError(f"Team with ID {team_id} not found in this game")
+    for team in teams:
+        players.extend(team.players)
+    
+    # Get all attendance records for this game
+    attendances = session.query(Attendance).filter_by(game_id=game_id).all()
+    attendance_by_player = {a.player_id: a for a in attendances}
+    
+    # Process each player
+    for player in players:
+        attendance = attendance_by_player.get(player.id)
+        if attendance:
+            if include_details:
+                item = attendance
+            else:
+                item = player
             
-        if attendance.status == AttendanceStatus.ATTENDING:
-            result["attending"].append(item)
-        elif attendance.status == AttendanceStatus.NOT_ATTENDING:
-            result["not_attending"].append(item)
-        else:  # PENDING
-            result["pending"].append(item)
+            if attendance.status == AttendanceStatus.ATTENDING:
+                result["attending"].append(item)
+            elif attendance.status == AttendanceStatus.NOT_ATTENDING:
+                result["not_attending"].append(item)
+            else:  # PENDING
+                result["pending"].append(item)
+        else:
+            # If no attendance record exists, player is pending
+            result["pending"].append(player if not include_details else None)
 
     return result
-    """Update a player's attendance status for a game."""
-    attendance = session.query(Attendance).filter_by(
-        game_id=game_id,
-        player_id=player_id
-    ).first()
-    
-    if attendance:
-        attendance.status = status
-        attendance.response_time = datetime.now()
-        if notes is not None:
-            attendance.notes = notes
-        session.commit()
-    
-    return attendance
 
 def add_player_to_team(
     session: Session,

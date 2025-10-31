@@ -12,3 +12,4 @@ get_player_by_discord  | session, discord_username
 get_game_attendance    | session, game_id, include_details
 add_player_to_team     | session, team_id, player
 remove_player_from_team | session, team_id, player
+delete_team             | session, team_id

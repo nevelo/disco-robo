@@ -22,7 +22,11 @@ from db_utils import (
     edit_game,
     set_attendance_status,
     get_team_games,
-    delete_team
+    get_team_roster,
+    delete_team,
+    delete_game,
+    get_game_attendance,
+    UNKNOWN_DISCORD
 )
 
 # Load environment variables
@@ -138,7 +142,6 @@ async def post_gametime_message(
 
 Coming? {EMOJI_THUMBS_UP} or {EMOJI_THUMBS_DOWN}!
 ```"""
-
     await channel.send(msg_content)
 
 
@@ -197,11 +200,18 @@ async def bot_get_schedule(ctx):
         await ctx.send(f"Error retrieving schedule: {str(e)}")
         print(f"Error in get_schedule: {e}", flush=True)
 
+# --------------------------------------
+# SET ATTENDANCE
+#
+# Purpose:  Set a player's attendance status for a game.
+# Syntax:   !set_attendance game=123 player=456 status=(yes|no|pending)
+# --------------------------------------
+
 @bot.command(name="set_attendance")
 @is_privileged()
 async def bot_set_attendance_status(ctx, *, args):
     """Set a player's attendance status for a game.
-    Usage: !set_attendance game=123 player=456 status=(yes|no|pending) [notes="optional note"]
+    Usage: !set_attendance game=123 player=456 status=(yes|no|pending)
     
     Arguments:
     - game: Game ID (required)
@@ -210,7 +220,6 @@ async def bot_set_attendance_status(ctx, *, args):
       - yes: Will attend
       - no: Will not attend
       - pending: Status not yet determined
-    - notes: Optional notes about attendance (e.g., "Running late", "Leaving early")
     """
     try:
         # Parse arguments
@@ -266,6 +275,12 @@ async def bot_set_attendance_status(ctx, *, args):
         await ctx.send(f"Error setting attendance: {str(e)}")
         print(f"Error in set_attendance: {e}", flush=True)
 
+# --------------------------------------
+# CREATE TEAM
+#
+# Purpose:  Create a new team.
+# Syntax:   !create_team name="Team Name" year=2025 season="Season Name" [home_colour="white"] [away_colour="black"]
+# --------------------------------------
 @bot.command(name="create_team")
 @is_privileged()
 async def bot_create_team(ctx, *, args):
@@ -276,9 +291,9 @@ async def bot_create_team(ctx, *, args):
     - name: Team name (required)
     - year: Year (required, must be current year or later)
     - season: Season name (required)
-    - home_colour: Home jersey color (optional, default: white)
-    - away_colour: Away jersey color (optional, default: black)
-    
+    - home_colour: Home jersey colour (optional, default: white)
+    - away_colour: Away jersey colour (optional, default: black)
+
     Available colours: black, white, green, blue, yellow, orange, brown, red, purple, rainbow
     """
     try:
@@ -306,15 +321,15 @@ async def bot_create_team(ctx, *, args):
         if not name:
             raise ValueError("Team name is required")
 
-        # Handle colors (support both UK and US spellings)
+        # Handle colours (support both UK and US spellings)
         home_colour = params.get('home_color', params.get('home_colour', 'white')).strip('"').lower()
         away_colour = params.get('away_color', params.get('away_colour', 'black')).strip('"').lower()
 
-        # Validate colors exist in the circles dictionary
+        # Validate colours exist in the circles dictionary
         if home_colour not in circles:
-            raise ValueError(f"Invalid home color. Available colors: {', '.join(circles.keys())}")
+            raise ValueError(f"Invalid home colour. Available colours: {', '.join(circles.keys())}")
         if away_colour not in circles:
-            raise ValueError(f"Invalid away color. Available colors: {', '.join(circles.keys())}")
+            raise ValueError(f"Invalid away colour. Available colours: {', '.join(circles.keys())}")
 
         # Create team
         with SessionLocal() as session:
@@ -323,8 +338,8 @@ async def bot_create_team(ctx, *, args):
                 name=name,
                 year=year,
                 season=season,
-                home_color=home_colour,
-                away_color=away_colour
+                home_colour=home_colour,
+                away_colour=away_colour
             )
             
             # Format success message with emojis
@@ -415,6 +430,240 @@ async def bot_delete_team(ctx, *, args):
         await ctx.send(f"An unexpected error occurred: {str(e)}")
         # Log the full error for debugging
         print(f"Error in delete_team: {e}", flush=True)
+
+# --------------------------------------
+# DELETE GAME
+#
+# Purpose:  Delete a game and all associated records.
+# Syntax:   !delete_game id=<game_id> CONFIRM=<date>
+# --------------------------------------
+@bot.command(name="delete_game")
+@is_privileged()
+async def bot_delete_game(ctx, *, args):
+    """Delete a game and all associated records.
+    Usage: !delete_game id=<game_id> CONFIRM=<date>
+    
+    Arguments:
+    - id: Game ID (required)
+    - CONFIRM: Game date for confirmation (required, must match exactly in YYYY-MM-DD format)
+    
+    Note: This will also delete all attendance records associated with the game.
+    """
+    try:
+        if not args:
+            await ctx.send("Error: Missing arguments. Usage: !delete_game id=<game_id> CONFIRM=<date>")
+            return
+        
+        params = parse_args(args)
+        try:
+            game_id = int(params.get('id', 0))
+            if game_id <= 0:
+                raise ValueError("Game ID must be a positive number")
+        except ValueError:
+            raise ValueError("Game ID must be a valid number")
+
+        with SessionLocal() as session:
+            # Find the game first
+            game = session.query(Game).filter(Game.id == game_id).first()
+            if not game:
+                raise ValueError(f"No game found with ID {game_id}")
+            
+            # Store game info for confirmation message
+            game_date = game.datetime.strftime("%Y-%m-%d")
+            game_info = f"{game.awayteam.name} @ {game.hometeam.name}"
+
+            # Check for confirmation
+            confirmation = params.get('CONFIRM', '').strip('"')
+            if not confirmation:
+                await ctx.send(
+                    f'You are trying to delete GAME "{game_info}" on {game_date}\n'
+                    f'If you really mean to do this, use the following syntax:\n'
+                    f'!delete_game id={game_id} CONFIRM="{game_date}"'
+                )
+                return
+
+            # Validate confirmation matches game date
+            if confirmation != game_date:
+                raise ValueError(f'Confirmation date "{confirmation}" does not match game date "{game_date}"')
+            
+            # Delete the game
+            delete_game(session=session, game_id=game_id)
+            
+            await ctx.send(
+                f"Game deleted successfully!\n"
+                f"Game: {game_info}\n"
+                f"Date: {game_date}"
+            )
+
+    except ValueError as ve:
+        await ctx.send(f"Error: {str(ve)}")
+    except Exception as e:
+        await ctx.send(f"An unexpected error occurred: {str(e)}")
+        # Log the full error for debugging
+        print(f"Error in delete_game: {e}", flush=True)
+
+# --------------------------------------
+# TEAM ROSTER
+#
+# Purpose: Show the team roster with players grouped by gender
+# Syntax:  !roster id=<team_id>
+# --------------------------------------
+@bot.command(name="roster")
+async def bot_get_roster(ctx, *, args):
+    """Display the roster for a team with players grouped by gender.
+    Usage: !roster id=<team_id>
+    
+    Shows all players on the team, organized by gender matching.
+    Players will be displayed with their discord username if available.
+    """
+    try:
+        if not args:
+            await ctx.send("Error: Missing arguments. Usage: !roster id=<team_id>")
+            return
+
+        params = parse_args(args)
+        try:
+            team_id = int(params.get('id', 0))
+            if team_id <= 0:
+                raise ValueError("Team ID must be a positive number")
+        except ValueError:
+            raise ValueError("Team ID must be a valid number")
+
+        with SessionLocal() as session:
+            # Get the team to verify it exists and get its name
+            team = session.query(Team).filter(Team.id == team_id).first()
+            if not team:
+                raise ValueError(f"No team found with ID {team_id}")
+
+            # Get the roster
+            players = get_team_roster(session, team_id, include_unknown=True)
+            
+            # Split players by gender
+            female_matching = []
+            open_matching = []
+            for player in players:
+                if player.gender == Genders.FEMALE_MATCHING:
+                    female_matching.append(player)
+                else:
+                    open_matching.append(player)
+            
+            # Sort each list by last name
+            female_matching.sort(key=lambda p: p.real_last)
+            open_matching.sort(key=lambda p: p.real_last)
+
+            # Calculate maximum lengths for formatting
+            max_name_length = max([len(f"{p.real_first} {p.real_last}") for p in players], default=0)
+            max_discord_length = max([len(p.discord_username) for p in players], default=0)
+            col_width = max(max_name_length + max_discord_length + 3, 30)  # +3 for parentheses and space
+            
+            # Build the roster display
+            lines = []
+            lines.append(f"Team Roster: {team.name}")
+            lines.append("|" + "-" * (col_width * 2 + 5) + "|")  # 5 for margins and separator
+            lines.append(f"| {'FEMALE MATCHING'.ljust(col_width)} | {'OPEN MATCHING'.ljust(col_width)} |")
+            lines.append("|" + "-" * (col_width * 2 + 5) + "|")
+
+            # Create rows, padding shorter list with empty strings
+            max_rows = max(len(female_matching), len(open_matching))
+            for i in range(max_rows):
+                f_player = female_matching[i] if i < len(female_matching) else None
+                o_player = open_matching[i] if i < len(open_matching) else None
+                
+                f_text = ""
+                if f_player:
+                    f_text = f"{f_player.real_first} {f_player.real_last}"
+                    if f_player.discord_username != UNKNOWN_DISCORD:
+                        f_text += f" ({f_player.discord_username})"
+                
+                o_text = ""
+                if o_player:
+                    o_text = f"{o_player.real_first} {o_player.real_last}"
+                    if o_player.discord_username != UNKNOWN_DISCORD:
+                        o_text += f" ({o_player.discord_username})"
+                
+                lines.append(f"| {f_text.ljust(col_width)} | {o_text.ljust(col_width)} |")
+            
+            lines.append("|" + "-" * (col_width * 2 + 5) + "|")
+            
+            await ctx.send("```\n" + "\n".join(lines) + "\n```")
+
+    except ValueError as ve:
+        await ctx.send(f"Error: {str(ve)}")
+    except Exception as e:
+        await ctx.send(f"An unexpected error occurred: {str(e)}")
+        # Log the full error for debugging
+        print(f"Error in get_roster: {e}", flush=True)
+
+# --------------------------------------
+# GAME ATTENDANCE
+#
+# Purpose: Show the attendance list for a game
+# Syntax:  !attendance game=<game_id>
+# --------------------------------------
+@bot.command(name="attendance")
+async def bot_get_attendance(ctx, *, args):
+    """Display the attendance list for a game.
+    Usage: !attendance game=<game_id>
+    
+    Shows all players grouped by their attendance status (attending, not attending, pending).
+    """
+    try:
+        if not args:
+            await ctx.send("Error: Missing arguments. Usage: !attendance game=<game_id>")
+            return
+
+        params = parse_args(args)
+        try:
+            game_id = int(params.get('game', 0))
+            if game_id <= 0:
+                raise ValueError("Game ID must be a positive number")
+        except ValueError:
+            raise ValueError("Game ID must be a valid number")
+
+        with SessionLocal() as session:
+            # Get the game to verify it exists and get teams
+            game = session.query(Game).filter(Game.id == game_id).first()
+            if not game:
+                raise ValueError(f"No game found with ID {game_id}")
+            
+            # Get attendance details
+            attendance = get_game_attendance(session, game_id, include_details=False)
+            
+            # Format the output
+            lines = []
+            lines.append(f"Game Attendance: {game.awayteam.name} @ {game.hometeam.name}")
+            lines.append(f"Date: {game.datetime.strftime('%A, %B %d %I:%M %p')}")
+            lines.append(f"Location: {game.park}, Field {game.field}")
+            lines.append("")
+            
+            # Format attendance lists
+            for status, players in attendance.items():
+                if status == "attending":
+                    title = "✅ Attending"
+                elif status == "not_attending":
+                    title = "❌ Not Attending"
+                else:
+                    title = "⏳ Pending Response"
+                
+                lines.append(title + ":")
+                if players:
+                    for player in players:
+                        if player.discord_username != UNKNOWN_DISCORD:
+                            lines.append(f"  • {player.real_first} {player.real_last} ({player.discord_username})")
+                        else:
+                            lines.append(f"  • {player.real_first} {player.real_last}")
+                else:
+                    lines.append("  (none)")
+                lines.append("")
+            
+            await ctx.send("```\n" + "\n".join(lines) + "\n```")
+
+    except ValueError as ve:
+        await ctx.send(f"Error: {str(ve)}")
+    except Exception as e:
+        await ctx.send(f"An unexpected error occurred: {str(e)}")
+        # Log the full error for debugging
+        print(f"Error in get_attendance: {e}", flush=True)
 
 # --------------------------------------
 # CREATE PLAYER
@@ -578,7 +827,7 @@ async def bot_create_game(ctx, *, args):
                 args=[
                     team1.name,
                     team2.name,
-                    'white',  # TODO: Add team colors to Team model
+                    'white',
                     'black',
                     game_datetime.strftime("%A, %B %d, %I:%M %p"),
                     park,

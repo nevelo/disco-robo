@@ -32,8 +32,8 @@ class Team(Base):
     name = Column(String, nullable=False)
     year = Column(Integer, nullable=False)
     season = Column(String, nullable=False)
-    home_color = Column(String, nullable=False, default="white")
-    away_color = Column(String, nullable=False, default="black")
+    home_colour = Column(String, nullable=False, default="white")
+    away_colour = Column(String, nullable=False, default="black")
 
     # Ensure no duplicate team with the same name-year-season combination exists
     __table_args__ = (UniqueConstraint("name", "year", "season"),)
@@ -56,7 +56,7 @@ class Team(Base):
 class Player(Base):
     __tablename__ = "players"
 
-    id = Column(Integer, primary_key=True)
+    id = Column(Integer, primary_key=True)  
     discord_username = Column(String, nullable=False)
     real_first = Column(String, nullable=False)
     real_last = Column(String, nullable=False)
