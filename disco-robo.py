@@ -1,6 +1,7 @@
 import os
 import asyncio
 import json
+import shlex
 from datetime import datetime
 from typing import List, Optional
 from dotenv import load_dotenv
@@ -9,13 +10,19 @@ from discord import Intents
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 from sqlalchemy.orm import Session
-from models import SessionLocal, Team, Player, Game, init_db, dispose_db
+from models import (
+    SessionLocal, Team, Player, Game, 
+    init_db, dispose_db, Genders, AttendanceStatus
+)
 from db_utils import (
     create_team,
     create_player,
-    create_game,    
+    create_game,
     edit_player,
-    edit_game
+    edit_game,
+    set_attendance_status,
+    get_team_games,
+    delete_team
 )
 
 # Load environment variables
@@ -59,6 +66,16 @@ def is_privileged():
         privileged_users = config.get("privileged_users", [])
         return ctx.author.id in privileged_users
     return commands.check(predicate)
+
+def parse_args(args_str):
+    # Split the string into tokens, respecting quotes
+    tokens = shlex.split(args_str)
+    params = {}
+    for token in tokens:
+        if '=' in token:
+            key, value = token.split('=', 1)
+            params[key] = value.strip('"')
+    return params
 
 # Discord intents
 intents = Intents.default()
@@ -127,75 +144,334 @@ Coming? {EMOJI_THUMBS_UP} or {EMOJI_THUMBS_DOWN}!
 
 # Commands for interfacing with database.
 
-# !create_team name="team name" year=Integer season="season String" 
-# (optional: home_color="color string" away_color="color string", defaults to white/black)  
-# (returns: integer team_ID)
-@bot.command()
+@bot.command(name="schedule")
+async def bot_get_schedule(ctx):
+    """Display the schedule for tracked teams.
+    Usage: !schedule
+    
+    Shows all upcoming games for the team(s) being tracked by this bot instance.
+    Configure tracked teams in config/config.json under "tracked_teams".
+    """
+    try:
+        # Get tracked teams from config
+        tracked_teams = get_tracked_teams()
+        if not tracked_teams:
+            await ctx.send("No teams are currently being tracked. Add team IDs to config/config.json")
+            return
+
+        with SessionLocal() as session:
+            # Get games for each tracked team
+            for team_id in tracked_teams:
+                team = session.query(Team).filter_by(id=team_id).first()
+                if not team:
+                    await ctx.send(f"Warning: Tracked team ID {team_id} not found in database")
+                    continue
+
+                games = get_team_games(session, team_id)
+                if not games:
+                    await ctx.send(f"No scheduled games found for {team.name}")
+                    continue
+
+                # Build schedule message
+                schedule_msg = [f"📅 Schedule for {team.name}:"]
+                for game in games:
+                    # Determine if team is home or away
+                    is_home = game.hometeam_id == team_id
+                    opponent = game.awayteam if is_home else game.hometeam
+                    home_away = "vs" if is_home else "@"
+
+                    # Format the game info
+                    date_str = game.datetime.strftime("%A, %B %d")
+                    time_str = game.datetime.strftime("%I:%M %p")
+                    game_line = (
+                        f"{date_str} {time_str}\n"
+                        f"{EMOJI_DISC} {team.name} {home_away} {opponent.name}\n"
+                        f"{EMOJI_MAP} {game.park}, Field {game.field}\n"
+                    )
+                    schedule_msg.append(game_line)
+
+                # Send the schedule
+                await ctx.send("\n".join(schedule_msg))
+
+    except Exception as e:
+        await ctx.send(f"Error retrieving schedule: {str(e)}")
+        print(f"Error in get_schedule: {e}", flush=True)
+
+@bot.command(name="set_attendance")
 @is_privileged()
-async def create_team(ctx, *, args):
-    """Create a new team. Usage: !create_team name="Team Name" year=2025 season="Fall" [home_color="white"] [away_color="black"]"""
+async def bot_set_attendance_status(ctx, *, args):
+    """Set a player's attendance status for a game.
+    Usage: !set_attendance game=123 player=456 status=(yes|no|pending) [notes="optional note"]
+    
+    Arguments:
+    - game: Game ID (required)
+    - player: Player ID (required)
+    - status: Attendance status (required)
+      - yes: Will attend
+      - no: Will not attend
+      - pending: Status not yet determined
+    - notes: Optional notes about attendance (e.g., "Running late", "Leaving early")
+    """
     try:
         # Parse arguments
-        params = dict(arg.split('=') for arg in args.split(' ') if '=' in arg)
+        params = parse_args(args)
         
         # Extract and validate required parameters
-        name = params.get('name', '').strip('"')
-        year = int(params.get('year', 0))
-        season = params.get('season', '').strip('"')
+        game_id = int(params.get('game', 0))
+        player_id = int(params.get('player', 0))
+        status_str = params.get('status', '').lower()
         
-        if not all([name, year, season]):
-            raise ValueError("Missing required parameters")
+        # Validate required fields
+        if not game_id:
+            raise ValueError("Game ID is required")
+        if not player_id:
+            raise ValueError("Player ID is required")
+        if not status_str:
+            raise ValueError("Status is required (yes, no, or pending)")
+            
+        # Convert status string to enum
+        status_map = {
+            'yes': AttendanceStatus.ATTENDING,
+            'no': AttendanceStatus.NOT_ATTENDING,
+            'pending': AttendanceStatus.PENDING
+        }
+        status = status_map.get(status_str)
+        if not status:
+            raise ValueError("Status must be 'yes', 'no', or 'pending'")
+        
+        with SessionLocal() as session:
+            # Set attendance status
+            attendance = set_attendance_status(
+                session=session,
+                game_id=game_id,
+                player_id=player_id,
+                status=status,
+            )
+            
+            # Format success message
+            status_emoji = {
+                AttendanceStatus.ATTENDING: EMOJI_THUMBS_UP,
+                AttendanceStatus.NOT_ATTENDING: EMOJI_THUMBS_DOWN,
+                AttendanceStatus.PENDING: CONFUSED_EMOJI
+            }
+            emoji = status_emoji[attendance.status]
+            
+            await ctx.send(
+                f"{emoji} Attendance status set for Player {player_id} in Game {game_id}"
+            )
 
-        # Optional parameters with defaults from your circles dict
-        home_colour = params.get('home_colour', 'white').strip('"').lower()
-        away_colour = params.get('away_colour', 'black').strip('"').lower()
-        home_colour = params.get('home_color', 'white').strip('"').lower()
-        away_colour = params.get('away_color', 'black').strip('"').lower()        
+    except ValueError as ve:
+        await ctx.send(f"Error: {str(ve)}")
+    except Exception as e:
+        await ctx.send(f"Error setting attendance: {str(e)}")
+        print(f"Error in set_attendance: {e}", flush=True)
+
+@bot.command(name="create_team")
+@is_privileged()
+async def bot_create_team(ctx, *, args):
+    """Create a new team. 
+    Usage: !create_team name="Team Name" year=2025 season="Season Name" [home_colour="white"] [away_colour="black"]
+    
+    Arguments:
+    - name: Team name (required)
+    - year: Year (required, must be current year or later)
+    - season: Season name (required)
+    - home_colour: Home jersey color (optional, default: white)
+    - away_colour: Away jersey color (optional, default: black)
+    
+    Available colours: black, white, green, blue, yellow, orange, brown, red, purple, rainbow
+    """
+    try:
+        if not args:
+            await ctx.send("Error: Missing arguments. Usage: !create_team name=\"Team Name\" year=2025 season=\"Season Name\" [home_colour=\"white\"] [away_colour=\"black\"]")
+            return
+        
+        params = parse_args(args)
+        name = params.get('name')
+        
+        try:
+            year = int(params.get('year', 0))
+            current_year = datetime.now().year
+            if year < current_year:
+                raise ValueError(f"Year must be {current_year} or later")
+        except ValueError as ve:
+            if "must be" in str(ve):
+                raise ve
+            raise ValueError("Year must be a valid number")
+            
+        season = params.get('season', '').strip('"')
+        if not season:
+            raise ValueError("Season name is required")
+        
+        if not name:
+            raise ValueError("Team name is required")
+
+        # Handle colors (support both UK and US spellings)
+        home_colour = params.get('home_color', params.get('home_colour', 'white')).strip('"').lower()
+        away_colour = params.get('away_color', params.get('away_colour', 'black')).strip('"').lower()
 
         # Validate colors exist in the circles dictionary
-        if home_colour not in circles or away_colour not in circles:
-            available_colors = ", ".join(circles.keys())
-            raise ValueError(f"Invalid color. Available colors are: {available_colors}")
+        if home_colour not in circles:
+            raise ValueError(f"Invalid home color. Available colors: {', '.join(circles.keys())}")
+        if away_colour not in circles:
+            raise ValueError(f"Invalid away color. Available colors: {', '.join(circles.keys())}")
 
         # Create team
         with SessionLocal() as session:
-            team = create_team(session, name, year, season)
-            await ctx.send(f"Team created successfully! Team ID: {team.id}")
+            team = create_team(
+                session=session,
+                name=name,
+                year=year,
+                season=season,
+                home_color=home_colour,
+                away_color=away_colour
+            )
+            
+            # Format success message with emojis
+            home_circle = circles[home_colour]
+            away_circle = circles[away_colour]
+            await ctx.send(
+                f"Team created successfully! {home_circle}{away_circle}\n"
+                f"ID: {team.id}\n"
+                f"Name: {team.name}\n"
+                f"Season: {season} {year}"
+            )
 
+    except ValueError as ve:
+        await ctx.send(f"Error: {str(ve)}")
     except Exception as e:
+        await ctx.send(f"An unexpected error occurred: {str(e)}")
+        # Log the full error for debugging
+        print(f"Error in create_team: {e}", flush=True)
         await ctx.send(f"Error creating team: {str(e)}")
 
-# !create_player lastname="lastname" firstname="firstname" gender=(m OR f) (with optional discord_ID="discord_ID")  (returns: player ID)
-@bot.command()
+# --------------------------------------
+# DELETE TEAM
+#
+# Purpose:  Delete an existing team.
+# Syntax:   !delete_team id=<team_id> CONFIRM="Team Name"
+# --------------------------------------
+@bot.command(name="delete_team")
 @is_privileged()
-async def create_player(ctx, *, args):
+async def bot_delete_team(ctx, *, args):
+    """Delete a team and all its associated records.
+    Usage: !delete_team id=<team_id> CONFIRM="Team Name"
+    
+    Arguments:
+    - id: Team ID (required)
+    - CONFIRM: Team name for confirmation (required, must match exactly)
+    
+    Note: This will also delete all games associated with the team.
+    """
+    try:
+        if not args:
+            await ctx.send("Error: Missing arguments. Usage: !delete_team id=<team_id>")
+            return
+        
+        params = parse_args(args)
+        try:
+            team_id = int(params.get('id', 0))
+            if team_id <= 0:
+                raise ValueError("Team ID must be a positive number")
+        except ValueError:
+            raise ValueError("Team ID must be a valid number")
+
+        with SessionLocal() as session:
+            # Find the team first
+            team = session.query(Team).filter(Team.id == team_id).first()
+            if not team:
+                raise ValueError(f"No team found with ID {team_id}")
+            
+            # Store team info for confirmation message
+            team_name = team.name
+            team_season = f"{team.season} {team.year}"
+
+            # Check for confirmation
+            confirmation = params.get('CONFIRM', '').strip('"')
+            if not confirmation:
+                await ctx.send(
+                    f'You are trying to delete TEAM "{team_name}"\n'
+                    f'If you really mean to do this, use the following syntax:\n'
+                    f'!delete_team id={team_id} CONFIRM="{team_name}"'
+                )
+                return
+
+            # Validate confirmation matches team name
+            if confirmation != team_name:
+                raise ValueError(f'Confirmation "{confirmation}" does not match team name "{team_name}"')
+            
+            # Delete the team
+            delete_team(session=session, team=team)
+            
+            await ctx.send(
+                f"Team deleted successfully!\n"
+                f"Name: {team_name}\n"
+                f"Season: {team_season}"
+            )
+
+    except ValueError as ve:
+        await ctx.send(f"Error: {str(ve)}")
+    except Exception as e:
+        await ctx.send(f"An unexpected error occurred: {str(e)}")
+        # Log the full error for debugging
+        print(f"Error in delete_team: {e}", flush=True)
+
+# --------------------------------------
+# CREATE PLAYER
+#
+# Purpose:  Create a new player.
+# Syntax:   !create_player lastname="lastname" firstname="firstname" gender=(m|f) [discord_ID="123456789"]
+# INPUTS:   FIELD       TYPE        DATA            DESCRIPTION
+#           player      Integer     player_ID       Player's unique integer ID.
+#           team        Integer     team_ID         Home team's unique integer ID.
+# --------------------------------------
+# !create_player lastname="lastname" firstname="firstname" gender=(m OR f) (with optional discord_ID="discord_ID")  (returns: player ID)
+@bot.command(name="create_player")
+@is_privileged()
+async def bot_create_player(ctx, *, args):
     """Create a new player. Usage: !create_player lastname="Smith" firstname="John" gender=(m|f) [discord_ID="123456789"]"""
     try:
-        # Parse arguments
-        params = dict(arg.split('=') for arg in args.split(' ') if '=' in arg)
+        if not args:
+            await ctx.send("Error: Missing arguments. Usage: !create_player first=\"John\" last=\"Smith\" gender=(m|f) [discord=\"123456789\"]")
+            return
+            
+        # Parse arguments using shlex to handle quoted strings
+        params = parse_args(args)
         
         # Extract and validate required parameters
-        lastname = params.get('lastname', '').strip('"')
-        firstname = params.get('firstname', '').strip('"')
+        lastname = params.get('last', '').strip('"')
+        firstname = params.get('first', '').strip('"')
         gender = params.get('gender', '').lower()
         
-        if not all([lastname, firstname]) or gender not in ['m', 'f']:
-            raise ValueError("Missing or invalid required parameters")
+        if not all([lastname, firstname]):
+            raise ValueError("Missing required parameters")
+        
+        if gender not in ['m', 'f', 'o']:
+            raise ValueError("Gender must be 'm', 'f', or 'o'")
 
         # Optional discord ID
-        discord_id = params.get('discord_ID', '').strip('"')
+        username = params.get('discord', '').strip('"')
         
         with SessionLocal() as session:
+            # Convert gender string to the correct enum value
+            if gender == 'm' or gender == 'o':
+                gender = Genders.OPEN_MATCHING.value
+            else:  # gender == 'f'
+                gender = Genders.FEMALE_MATCHING.value
+
             player = create_player(
                 session,
-                real_name=f"{firstname} {lastname}",
-                discord_username=discord_id if discord_id else None,
+                first_name=firstname,
+                last_name=lastname,
+                discord_username=username if username else None,
                 gender=gender
             )
             await ctx.send(f"Player created successfully! Player ID: {player.id}")
 
     except Exception as e:
         await ctx.send(f"Error creating player: {str(e)}")
+        # Log the full error for debugging
+        print(f"Error in create_player: {e}", flush=True)
 
 # --------------------------------------
 # ADD PLAYER TO TEAM
@@ -206,9 +482,9 @@ async def create_player(ctx, *, args):
 #           player      Integer     player_ID       Player's unique integer ID.
 #           team        Integer     team_ID         Home team's unique integer ID.
 # --------------------------------------
-@bot.command()
+@bot.command(name="add_player")
 @is_privileged()
-async def add_player(ctx, *, args):
+async def bot_add_player(ctx, *, args):
     """Add a player to a team. Usage: !add_player player=123 team=456"""
     try:
         params = dict(arg.split('=') for arg in args.split(' ') if '=' in arg)
@@ -233,7 +509,7 @@ async def add_player(ctx, *, args):
 # CREATE GAME
 #
 # Purpose:  Add a new game to the database.
-# Syntax:   !add_game awayteam=team1_ID hometeam=team2_ID date=String time=HH:mm park="park" field=Int
+# Syntax:   !add_game awayteam=team1_ID hometeam=team2_ID date="YYYY-MM-DD" time="HH:mm" park="park" field=Int
 # INPUTS:   FIELD       TYPE        DATA            DESCRIPTION
 #           awayteam    Integer     team1_ID        Away team's unique integer ID.
 #           hometeam    Integer     team2_ID        Home team's unique integer ID.
@@ -242,31 +518,50 @@ async def add_player(ctx, *, args):
 #           park        String      park            Name of the park where the game will be held.
 #           field       Integer     field           Field number at the park.
 # --------------------------------------
-@bot.command()
+@bot.command(name="create_game")
 @is_privileged()
-async def create_game(ctx, *, args):
+async def bot_create_game(ctx, *, args):
     try:
-        params = dict(arg.split('=') for arg in args.split(' ') if '=' in arg)
+        params = parse_args(args)
+        
+        # Parse arguments
+        params = parse_args(args)
         
         # Extract and validate parameters
-        away_team_id = int(params.get('awayteam', 0))
-        home_team_id = int(params.get('hometeam', 0))
+        away_team_id = int(params.get('away', 0))
+        home_team_id = int(params.get('home', 0))
         date_str = params.get('date', '').strip('"')
         time_str = params.get('time', '').strip('"')
         park = params.get('park', '').strip('"')
         field = int(params.get('field', 0))
 
-        if not all([away_team_id, home_team_id, date_str, time_str, park, field]):
-            raise ValueError("Missing required parameters")
+        # Validate each parameter individually
+        if not away_team_id:
+            raise ValueError("Missing or invalid away team ID")
+        if not home_team_id:
+            raise ValueError("Missing or invalid home team ID")
+        if not date_str:
+            raise ValueError("Missing date")
+        if not time_str:
+            raise ValueError("Missing time")
+        if not park:
+            raise ValueError("Missing park name")
+        if not field:
+            raise ValueError("Missing or invalid field number")
 
         # Parse datetime
-        game_datetime = datetime.strptime(f"{date_str} {time_str}", "%Y-%m-%d %H:%M")
+        try:
+            game_datetime = datetime.strptime(f"{date_str} {time_str}", "%Y-%m-%d %H:%M")
+        except ValueError as ve:
+            raise ValueError(
+                "Invalid date/time format. Use YYYY-MM-DD for date and HH:MM for time (24-hour)"
+            ) from ve
 
         with SessionLocal() as session:
             game = create_game(
                 session,
-                team1_id=away_team_id,
-                team2_id=home_team_id,
+                awayteam_id=away_team_id,
+                hometeam_id=home_team_id,
                 datetime=game_datetime,
                 park=park,
                 field=field
@@ -308,12 +603,12 @@ async def create_game(ctx, *, args):
 #                                       Valid options include "datetime", "park", "field", "team1_id", "team2_id".
 #           String/Int  field_value     New value for the specified field.
 # --------------------------------------
-@bot.command()
+@bot.command(name="edit_player")
 @is_privileged()
-async def edit_player(ctx, *, args):
+async def bot_edit_player(ctx, *, args):
     """Edit a player's information. Usage: !edit_player id=123 field_name="new_value" """
     try:
-        params = dict(arg.split('=') for arg in args.split(' ') if '=' in arg)
+        params = parse_args(args)
         player_id = int(params.get('id', 0))
         
         if not player_id:
@@ -327,13 +622,32 @@ async def edit_player(ctx, *, args):
             if not player:
                 raise ValueError(f"Player {player_id} not found")
 
-            # Update each provided field
+            # Map command parameters to database field names
+            field_mapping = {
+                'first': 'real_first',
+                'last': 'real_last',
+                'discord': 'discord_username',
+                'gender': 'gender'
+            }
+            
+            # Update each provided field using the mapping
             for field, value in params.items():
                 value = value.strip('"')
-                if hasattr(player, field):
-                    setattr(player, field, value)
-                else:
-                    await ctx.send(f"Warning: Field '{field}' does not exist and was skipped")
+                db_field = field_mapping.get(field)
+                if not db_field:
+                    await ctx.send(f"Warning: Field '{field}' is not a valid field name")
+                    continue
+                
+                # Special handling for gender field
+                if field == 'gender':
+                    if value.lower() == 'm' or value.lower() == 'o':
+                        value = Genders.OPEN_MATCHING
+                    elif value.lower() == 'f':
+                        value = Genders.FEMALE_MATCHING
+                    else:
+                        raise ValueError("Gender must be 'm', 'f', or 'o'")
+                
+                setattr(player, db_field, value)
 
             session.commit()
             await ctx.send(f"Player {player_id} updated successfully")
@@ -353,12 +667,12 @@ async def edit_player(ctx, *, args):
 #                                       Valid options include "datetime", "park", "field", "team1_id", "team2_id".
 #           String/Int  field_value     New value for the specified field.
 # --------------------------------------
-@bot.command()
+@bot.command(name="edit_game")
 @is_privileged()
-async def edit_game(ctx, *, args):
+async def bot_edit_game(ctx, *, args):
     """Edit a game's information. Usage: !edit_game id=123 field_name="new_value" """
     try:
-        params = dict(arg.split('=') for arg in args.split(' ') if '=' in arg)
+        params = parse_args(args)
         game_id = int(params.get('id', 0))
         
         if not game_id:
@@ -389,9 +703,6 @@ async def edit_game(ctx, *, args):
     except Exception as e:
         await ctx.send(f"Error updating game: {str(e)}")
 
-# Start the scheduler ##TODO: Move to on_ready?
-scheduler.start()
-
 ## --- ON_READY event --- 
 
 @bot.event
@@ -402,6 +713,9 @@ async def on_ready():
     init_db(DB_URL, echo=True)
     print("Database initialized!")
     
+    # Start the scheduler
+    scheduler.start()
+    
     channel = bot.get_channel(BOT_COMMS_CHANNEL_ID) or await bot.fetch_channel(BOT_COMMS_CHANNEL_ID)
     await channel.send("I'm... alive!")
 
@@ -410,5 +724,5 @@ if __name__ == "__main__":
     try:
         bot.run(TOKEN)
     finally:
-        # Properly dispose of database resources on shutdown
+        scheduler.shutdown()
         dispose_db()

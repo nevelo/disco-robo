@@ -1,9 +1,14 @@
 import unittest
 from datetime import datetime
+import sqlalchemy
 from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-from models import Base, Team, Player, Game, Attendance, AttendanceStatus
-from db_utils import create_team, create_player, create_game
+from sqlalchemy.orm import sessionmaker, joinedload
+from models import Base, Team, Player, Game, Attendance, AttendanceStatus, Genders
+from db_utils import (
+    create_team, create_player, create_game, get_team_roster, 
+    add_player_to_team, get_player, remove_player_from_team, delete_game,
+    get_team_games, set_attendance_status, get_game_attendance, get_player_by_discord
+)
 
 class TestDatabase(unittest.TestCase):
     def setUp(self):
@@ -23,11 +28,23 @@ class TestDatabase(unittest.TestCase):
 
     def tearDown(self):
         """Clean up after each test."""
+        # Rollback any pending transactions
+        self.session.rollback()
+        
+        # Close the session
         self.session.close()
+        
+        # Drop all tables (this will close any remaining connections)
         Base.metadata.drop_all(self.engine)
+        
+        # Dispose of the engine and all its connections
+        self.engine.dispose()
+        
+        # Remove the session
+        self.session = None
 
     def create_test_data(self):
-        """Create sample teams for testing."""
+        """Create sample teams, players, and games for testing."""
         # Create four teams
         self.disco_ninjas = create_team(
             self.session,
@@ -65,50 +82,102 @@ class TestDatabase(unittest.TestCase):
             away_color="orange"
         )
 
+        # Create six players
+        self.players = [
+            create_player(self.session, "Alice", "Johnson", Genders.FEMALE_MATCHING, "alice#1234"),
+            create_player(self.session, "Bob", "Smith", Genders.MALE_MATCHING, "bob#5678"),
+            create_player(self.session, "Carol", "Davis", Genders.FEMALE_MATCHING, "carol#9012"),
+            create_player(self.session, "David", "Wilson", Genders.MALE_MATCHING, "david#3456"),
+            create_player(self.session, "Eve", "Brown", Genders.FEMALE_MATCHING, "eve#7890"),
+            create_player(self.session, "Frank", "Miller", Genders.MALE_MATCHING, "frank#1234")
+        ]
+        
+        # Add players to Cosmic Rays team
+        for player in self.players:
+            add_player_to_team(self.session, self.cosmic_rays.id, player)
+        
+        # Create the game schedule
+        self.games = [
+            # Game 1: Cosmic Rays (at) Disco Ninjas
+            create_game(
+                self.session,
+                self.cosmic_rays.id,  # away
+                self.disco_ninjas.id,  # home
+                datetime(2025, 10, 29, 18, 0),  # 6:00 PM
+                "Guelph Lake",
+                2
+            ),
+            # Game 2: Ultimate Warriors (at) Cosmic Rays
+            create_game(
+                self.session,
+                self.ultimate_warriors.id,  # away
+                self.cosmic_rays.id,  # home
+                datetime(2025, 11, 6, 19, 0),  # 7:00 PM
+                "Margaret Greene",
+                4
+            ),
+            # Game 3: Cosmic Rays (at) Flying Squirrels
+            create_game(
+                self.session,
+                self.cosmic_rays.id,  # away
+                self.flying_squirrels.id,  # home
+                datetime(2025, 11, 13, 16, 0),  # 4:00 PM
+                "Marden Park",
+                1
+            )
+        ]
+
+        # Commit all changes
+        self.session.commit()
+
     def display_database_contents(self):
         """Display all contents of the test database."""
-        print("\n=== Database Contents ===")
+        # Create a new session for this display to avoid interfering with test sessions
+        display_session = sessionmaker(bind=self.engine)()
         
-        # Display Teams
-        print("\nTeams:")
-        teams = self.session.query(Team).all()
-        for team in teams:
-            print(f"  {team.id}: {team.name} ({team.year} {team.season})")
-            print(f"     Colors: {team.home_color}/{team.away_color}")
-            print(f"     Players: {len(team.players)}")
-        
-        # Display Players
-        print("\nPlayers:")
-        players = self.session.query(Player).all()
-        for player in players:
-            print(f"  {player.id}: {player.real_first} {player.real_last}")
-            print(f"     Discord: {player.discord_username}")
-            print(f"     Gender: {player.gender}")
-            print(f"     Teams: {[team.name for team in player.teams]}")
-        
-        # Display Games
-        print("\nGames:")
-        games = self.session.query(Game).all()
-        for game in games:
-            print(f"  {game.id}: {game.awayteam.name} vs {game.hometeam.name}")
-            print(f"     When: {game.datetime}")
-            print(f"     Where: {game.park} Field {game.field}")
-        
-        # Display Attendance
-        print("\nAttendance:")
-        attendance = self.session.query(Attendance).all()
-        for record in attendance:
-            print(f"  Game {record.game_id}, Player {record.player.real_first}: {record.status.value}")
-            if record.response_time:
-                print(f"     Responded: {record.response_time}")
-            if record.notes:
-                print(f"     Notes: {record.notes}")
+        try:
+            print("\n=== Database Contents ===")
+            
+            # Display Teams
+            print("\nTeams:")
+            teams = display_session.query(Team).all()
+            print(f"    Found {len(teams)} teams in the database")
+            for team in teams:
+                print(f"  {team.id}: {team.name} ({team.year} {team.season})")
+                print(f"     Colors: {team.home_color}/{team.away_color}")
+                print(f"     Players: {len(team.players)}")
+            
+            # Display Players
+            print("\nPlayers:")
+            players = display_session.query(Player).all()
+            print(f"    Found {len(players)} players in the database")
+            for player in players:
+                print(f"  {player.id}: {player.real_first} {player.real_last}")
+                print(f"     Discord: {player.discord_username}")
+                print(f"     Gender: {player.gender}")
+                print(f"     Teams: {[team.name for team in player.teams]}")
+            
+            # Display Games
+            print("\nGames:")
+            games = display_session.query(Game).all()
+            print(f"    Found {len(games)} games in the database")
+            for game in games:
+                print(f"  {game.id}: {game.awayteam.name} @ {game.hometeam.name}")
+                print(f"     When: {game.datetime.strftime('%I:%M %p, %B %d, %Y')}")
+                print(f"     Where: {game.park} Field {game.field}")
+            
+            # Display Attendance
+            print("\nAttendance:")
+            attendance = display_session.query(Attendance).all()
+            if attendance:
+                for record in attendance:
+                    print(f"  {record.id}: {record.player.get_full_name()} - {record.status}")
+        finally:
+            # Ensure the session is closed even if an error occurs
+            display_session.close()
 
     def test_database_setup(self):
-        """Test that the database was set up correctly."""
-        # Display the contents
-        self.display_database_contents()
-        
+        """Test that the database was set up correctly."""        
         # Verify teams were created
         teams = self.session.query(Team).all()
         self.assertEqual(len(teams), 4, "Should have created 4 teams")
@@ -122,6 +191,232 @@ class TestDatabase(unittest.TestCase):
             "Cosmic Rays"
         }
         self.assertEqual(team_names, expected_names, "Team names don't match expected values")
+
+    def test_player_team_relationships(self):
+        """Test verifying player-team relationships."""
+        # Verify Cosmic Rays roster
+        roster = get_team_roster(self.session, self.cosmic_rays.id)
+        
+        # Verify counts and membership
+        self.assertEqual(len(roster), 6, "Should have 6 players on the team")
+        roster_names = {f"{p.real_first} {p.real_last}" for p in roster}
+        expected_names = {
+            "Alice Johnson",
+            "Bob Smith",
+            "Carol Davis",
+            "David Wilson",
+            "Eve Brown",
+            "Frank Miller"
+        }
+        self.assertEqual(roster_names, expected_names, "Roster names don't match expected values")
+
+    def test_get_player(self):
+        """Test getting a player by ID."""
+        # Get an existing player
+        alice = self.players[0]  # Alice Johnson
+        retrieved_player = get_player(self.session, alice.id)
+        self.assertIsNotNone(retrieved_player)
+        self.assertEqual(retrieved_player.real_first, "Alice")
+        self.assertEqual(retrieved_player.real_last, "Johnson")
+        self.assertEqual(retrieved_player.discord_username, "alice#1234")
+        
+        # Try getting a non-existent player
+        nonexistent_player = get_player(self.session, 9999)
+        self.assertIsNone(nonexistent_player)
+
+    def test_game_schedule(self):
+        """Test that games were created correctly and can be retrieved."""
+        # Verify each game exists and has correct data
+        for game in self.games:
+            retrieved_game = self.session.query(Game).filter_by(id=game.id).first()
+            self.assertIsNotNone(retrieved_game, f"Game {game.id} should exist")
+            
+            # Verify game details
+            self.assertEqual(retrieved_game.park, game.park)
+            self.assertEqual(retrieved_game.field, game.field)
+            self.assertEqual(retrieved_game.datetime, game.datetime)
+            self.assertEqual(retrieved_game.awayteam.id, game.awayteam.id)
+            self.assertEqual(retrieved_game.hometeam.id, game.hometeam.id)
+
+        # Get all games for Cosmic Rays
+        cosmic_rays_games = get_team_games(self.session, self.cosmic_rays.id)
+
+        # Print the schedule for debugging
+        print("\nCosmic Rays Schedule:")
+        for game in cosmic_rays_games:
+            away_team = game.awayteam
+            home_team = game.hometeam
+            print(f"{game.datetime.strftime('%I:%M %p')}: "
+                  f"{away_team.name} @ {home_team.name}, "
+                  f"{game.park} Field {game.field}")
+
+        # Verify correct number of games
+        self.assertEqual(len(cosmic_rays_games), 3, "Should have 3 games for Cosmic Rays")
+
+    def test_delete_game(self):
+        """Test deleting a game and its attendance records."""
+        # Get initial game and attendance counts
+        initial_games = self.session.query(Game).count()
+        initial_attendance = self.session.query(Attendance).count()
+        
+        # Get a specific game to delete (first game)
+        game_to_delete = self.games[0]
+        game_id = game_to_delete.id
+        
+        # Count attendance records for this specific game
+        game_attendance_count = self.session.query(Attendance)\
+            .filter_by(game_id=game_id)\
+            .count()
+        
+        # Delete the game
+        delete_game(self.session, game_id)
+        
+        # Verify game no longer exists
+        deleted_game = self.session.query(Game).filter_by(id=game_id).first()
+        self.assertIsNone(deleted_game, "Game should be deleted")
+        
+        # Verify game's attendance records are gone
+        game_attendance = self.session.query(Attendance).filter_by(game_id=game_id).all()
+        self.assertEqual(len(game_attendance), 0, "Game attendance records should be deleted")
+        
+        # Verify overall counts
+        self.assertEqual(
+            self.session.query(Game).count(),
+            initial_games - 1,
+            "Should have one less game"
+        )
+        self.assertEqual(
+            self.session.query(Attendance).count(),
+            initial_attendance - game_attendance_count,
+            "Should have fewer attendance records"
+        )
+        
+        # Try to delete non-existent game
+        with self.assertRaises(ValueError):
+            delete_game(self.session, 9999)
+
+    def display_attendance_summary(self, game):
+        """Helper method to display attendance summary for a game."""
+        # Get attendance grouped by status
+        attendance = get_game_attendance(self.session, game.id)
+        
+        # Format each group into first names only
+        attending = sorted([p.real_first for p in attendance["attending"]])
+        not_attending = sorted([p.real_first for p in attendance["not_attending"]])
+        pending = sorted([p.real_first for p in attendance["pending"]])
+        
+        # Print concise summary
+        print(f"Y: {', '.join(attending) if attending else '-'}")
+        print(f"N: {', '.join(not_attending) if not_attending else '-'}")
+        print(f"?: {', '.join(pending) if pending else '-'}")
+
+    def test_attendance_tracking(self):
+        """Test tracking attendance for a game with various status changes."""
+        # We'll use the first game (Cosmic Rays @ Disco Ninjas)
+        game = self.games[0]
+        
+        # Create initial PENDING attendance records if they don't exist
+        existing_attendance = self.session.query(Attendance)\
+            .filter_by(game_id=game.id)\
+            .all()
+            
+        if not existing_attendance:
+            for player in self.players:
+                attendance = Attendance(
+                    player=player,
+                    game=game,
+                    status=AttendanceStatus.PENDING
+                )
+                self.session.add(attendance)
+            self.session.commit()
+        else:
+            # Reset all to PENDING
+            self.session.query(Attendance)\
+                .filter_by(game_id=game.id)\
+                .update({Attendance.status: AttendanceStatus.PENDING})
+            self.session.commit()
+        
+        print("\nInitial state:")
+        self.display_attendance_summary(game)
+        
+        # Two players set ATTENDING
+        print("\nStep 1: Alice and Bob set to ATTENDING")
+        alice = get_player_by_discord(self.session, "alice#1234")
+        set_attendance_status(self.session, game.id, alice.id, AttendanceStatus.ATTENDING)
+        bob = get_player_by_discord(self.session, "bob#5678")
+        set_attendance_status(self.session, game.id, bob.id, AttendanceStatus.ATTENDING)
+        self.display_attendance_summary(game)
+        
+        # One player set NOT ATTENDING
+        print("\nStep 2: Carol sets to NOT ATTENDING")
+        carol = get_player_by_discord(self.session, "carol#9012")
+        set_attendance_status(self.session, game.id, carol.id, AttendanceStatus.NOT_ATTENDING)
+        self.display_attendance_summary(game)
+        
+        # One more player set ATTENDING
+        print("\nStep 3: David sets to ATTENDING")
+        david = get_player_by_discord(self.session, "david#3456")
+        set_attendance_status(self.session, game.id, david.id, AttendanceStatus.ATTENDING)
+        self.display_attendance_summary(game)
+
+        # Frank leaves the team
+        print("\nStep 3.5: Frank leaves the team")
+        frank = get_player_by_discord(self.session, "frank#1234")
+        # Use the new utility function to remove Frank from the team
+        remove_player_from_team(self.session, self.cosmic_rays.id, frank)
+        self.display_attendance_summary(game)
+        
+        # One more player set NOT ATTENDING
+        print("\nStep 4: Eve sets to NOT ATTENDING")
+        eve = get_player_by_discord(self.session, "eve#7890")
+        set_attendance_status(self.session, game.id, eve.id, AttendanceStatus.NOT_ATTENDING)
+        self.display_attendance_summary(game)
+
+        # Add a new player George
+        print("\nStep 4.5: Adding new player George")
+        george = create_player(
+            self.session,
+            "George",
+            "Wallis",
+            Genders.MALE_MATCHING,
+            "george#4567"
+        )
+        add_player_to_team(self.session, self.cosmic_rays.id, george)
+        
+        # Create attendance record for George (starts as PENDING)
+        attendance = Attendance(
+            player=george,
+            game=game,
+            status=AttendanceStatus.PENDING
+        )
+        self.session.add(attendance)
+        self.session.commit()
+        self.display_attendance_summary(game)
+        
+        # One player switches from ATTENDING to NOT ATTENDING
+        print("\nStep 5: Bob switches from ATTENDING to NOT ATTENDING")
+        self.session.query(Attendance)\
+            .filter_by(game_id=game.id, player_id=self.players[1].id)\
+            .update({Attendance.status: AttendanceStatus.NOT_ATTENDING})
+        self.session.commit()
+        self.display_attendance_summary(game)
+        
+        # Final state
+        print("\nFinal state")
+        self.display_attendance_summary(game)
+        
+        # Verify final attendance counts
+        final_attendance = self.session.query(Attendance)\
+            .filter_by(game_id=game.id)\
+            .all()
+        
+        attending_count = sum(1 for a in final_attendance if a.status == AttendanceStatus.ATTENDING)
+        not_attending_count = sum(1 for a in final_attendance if a.status == AttendanceStatus.NOT_ATTENDING)
+        pending_count = sum(1 for a in final_attendance if a.status == AttendanceStatus.PENDING)
+        
+        self.assertEqual(attending_count, 2, "Should have 2 players attending")
+        self.assertEqual(not_attending_count, 3, "Should have 3 players not attending")
+        self.assertEqual(pending_count, 1, "Should have 1 player pending (George)")
 
 if __name__ == '__main__':
     unittest.main()

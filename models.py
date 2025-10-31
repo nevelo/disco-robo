@@ -12,7 +12,7 @@ class AttendanceStatus(enum.Enum):
     NOT_ATTENDING = "no"    # Confirmed not attending
 
 class Genders(enum.Enum):
-    MALE_MATCHING = "m"
+    OPEN_MATCHING = "m"
     FEMALE_MATCHING = "f"
 
 # --- Association Tables ---
@@ -110,7 +110,6 @@ class Attendance(Base):
     status = Column(Enum(AttendanceStatus), nullable=False, default=AttendanceStatus.PENDING)
     response_time = Column(DateTime, nullable=True)  # When they last responded
     reminder_sent = Column(DateTime, nullable=True)  # When the last reminder was sent
-    notes = Column(String, nullable=True)  # Optional notes (e.g., "Running late")
 
     # Relationships
     game = relationship("Game", back_populates="attendances")
