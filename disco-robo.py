@@ -11,21 +11,18 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 from sqlalchemy.orm import Session
 from models import (
-    SessionLocal, Team, Player, Game, 
+    SessionLocal, Player, Game, Team,
     init_db, dispose_db, Genders, AttendanceStatus
 )
 from db_utils import (
-    create_team,
-    create_player,
-    create_game,
-    edit_player,
-    edit_game,
+    create_team, edit_team, delete_team, get_team_data,
+    create_player, edit_player, delete_player, get_player_data,
+    create_game, edit_game, delete_game, get_game_data,
     set_attendance_status,
     get_team_games,
     get_team_roster,
-    delete_team,
-    delete_game,
     get_game_attendance,
+    add_player_to_team,
     UNKNOWN_DISCORD
 )
 
@@ -99,6 +96,9 @@ EMOJI_THUMBS_UP      = "\U0001F44D"
 EMOJI_THUMBS_DOWN    = "\U0001F44E"
 EMOJI_CLOCK          = "\U0001F550"
 EMOJI_MAP            = "\U0001F4CD"
+EMOJI_GREEN_CHECK    = "\u2705"
+EMOJI_RED_X          = "\u274C"
+EMOJI_HOURGLASS      = "\u23F3"
 
 CONFUSED_EMOJI       = "\u2049\uFE0F"
 
@@ -119,31 +119,143 @@ circles = {
     "rainbow": "\U0001F308",
 }
 
+async def post_gametime_message(game_id: int):
+    with SessionLocal() as session:
+        home_id = get_game_data(session, game_id, "hometeam_id")
+        if (home_id == None):
+            raise ValueError(f"Game {game_id} has no hometeam_id")
+        away_id = get_game_data(session, game_id, "awayteam_id")
+        gametime = get_game_data(session, game_id, "gametime")
+        park = get_game_data(session, game_id, "park")
+        field = get_game_data(session, game_id, "field")
+        hometeam = get_team_data(session, home_id, "name")
+        awayteam = get_team_data(session, away_id, "name")
+        away_colour = get_team_data(session, away_id, "away_colour")
+        home_colour = get_team_data(session, home_id, "home_colour")    
+
+    await post_gametime_message(
+        game_id=game_id,
+        awayteam=awayteam,
+        hometeam=hometeam,
+        away_colour=away_colour,
+        home_colour=home_colour,
+        gametime=gametime,
+        park=park,
+        field=field
+    )
+
 async def post_gametime_message(
-    team: str,
-    opponent: str,
+    game_id: int,
+    awayteam: str,
+    hometeam: str,
     team_colour: str,
     opp_colour: str,
     gametime: str,   # for now -- switch to unix time once the bot is more interactive
     park: str,
     field: int
 ):
+    """Post initial game announcement and return the message for reaction tracking"""
     channel = bot.get_channel(CHANNEL_ID) or await bot.fetch_channel(CHANNEL_ID)
     team_colour_emoji = circles.get(team_colour, CONFUSED_EMOJI)
     opp_colour_emoji = circles.get(opp_colour, CONFUSED_EMOJI)
 
+    # Get current attendance
+    with SessionLocal() as session:
+        attendance = get_game_attendance(session, game_id)
+        attending = [f"{p.real_first} {p.real_last}" for p in attendance["attending"]]
+        not_attending = [f"{p.real_first} {p.real_last}" for p in attendance["not_attending"]]
+        pending = [f"{p.real_first} {p.real_last}" for p in attendance["pending"]]
+
     msg_content = f"""```
 {EMOJI_DISC} {EMOJI_DISC} GAME ALERT!! {EMOJI_DISC} {EMOJI_DISC}
 
-{team_colour_emoji} {team} vs {opp_colour_emoji} {opponent}
+{team_colour_emoji} {awayteam} vs {opp_colour_emoji} {hometeam}
 
 {EMOJI_CLOCK} {gametime}
 {EMOJI_MAP} {park}, Field {field}
 
-Coming? {EMOJI_THUMBS_UP} or {EMOJI_THUMBS_DOWN}!
-```"""
-    await channel.send(msg_content)
+{EMOJI_GREEN_CHECK} {attending}
+{EMOJI_RED_X} {not_attending}
+{EMOJI_HOURGLASS} {pending}
 
+React with {EMOJI_THUMBS_UP} or {EMOJI_THUMBS_DOWN} to update your status!
+```"""
+    msg = await channel.send(msg_content)
+
+    # Add reactions for attendance tracking
+    for emoji in YES_EMOJI_LIST:
+        await msg.add_reaction(emoji)
+    for emoji in NO_EMOJI_LIST:
+        await msg.add_reaction(emoji)
+    return msg
+
+
+async def send_bother_message(game_id: int):
+    """Send message to bother pending players"""
+    with SessionLocal() as session:
+        game = session.query(Game).filter_by(id=game_id).first()
+        attendance = get_game_attendance(session, game_id)
+        
+        # Get discord IDs for pending players
+        pending_players = [p for p in attendance["pending"] if p.discord_username != UNKNOWN_DISCORD]
+        if not pending_players:
+            return
+
+        mentions = " ".join(f"<@{p.discord_username}>" for p in pending_players)
+        channel = bot.get_channel(CHANNEL_ID)
+        
+        await channel.send(
+            f"🔔 Hey {mentions}! Still waiting on your response for the game in 2 days!\n"
+            f"({game.awayteam.name} @ {game.hometeam.name}, "
+            f"{game.datetime.strftime('%A at %I:%M %p')})"
+        )
+
+async def send_pester_message(game_id: int):
+    """Send final warning to pending players"""
+    # Similar to bother_message but with more urgent tone
+    return
+
+async def send_day_of_game_reminder_message(game_id: int):
+    """Send day-of game reminder"""
+    # Send reminder to all attending players
+    return
+
+def schedule_game_notifications(game_id: int, game_time: datetime):
+    """Schedule all notifications for a game"""
+    # Schedule initial announcement (3 days before)
+    announcement_time = game_time - timedelta(days=3)
+    scheduler.add_job(
+        post_gametime_message,
+        'date',
+        run_date=announcement_time,
+        args=[game_id]
+    )
+
+    # Schedule bother message (2 days before)
+    bother_time = game_time - timedelta(days=2)
+    scheduler.add_job(
+        send_bother_message,
+        'date',
+        run_date=bother_time,
+        args=[game_id]
+    )
+
+    # Schedule pester message (1 day before)
+    pester_time = game_time - timedelta(days=1)
+    scheduler.add_job(
+        send_pester_message,
+        'date',
+        run_date=pester_time,
+        args=[game_id]
+    )
+
+    # Schedule day-of reminder
+    scheduler.add_job(
+        send_day_of_game_reminder_message,
+        'date',
+        run_date=game_time - timedelta(hours=12),
+        args=[game_id]
+    )
 
 # Commands for interfacing with database.
 
@@ -165,18 +277,14 @@ async def bot_get_schedule(ctx):
         with SessionLocal() as session:
             # Get games for each tracked team
             for team_id in tracked_teams:
-                team = session.query(Team).filter_by(id=team_id).first()
-                if not team:
-                    await ctx.send(f"Warning: Tracked team ID {team_id} not found in database")
-                    continue
-
+                team_name = get_team_data(session, team_id, param='name')
                 games = get_team_games(session, team_id)
                 if not games:
-                    await ctx.send(f"No scheduled games found for {team.name}")
+                    await ctx.send(f"No scheduled games found for {team_name}")
                     continue
 
                 # Build schedule message
-                schedule_msg = [f"📅 Schedule for {team.name}:"]
+                schedule_msg = [f"📅 Schedule for {team_name}:"]
                 for game in games:
                     # Determine if team is home or away
                     is_home = game.hometeam_id == team_id
@@ -184,11 +292,14 @@ async def bot_get_schedule(ctx):
                     home_away = "vs" if is_home else "@"
 
                     # Format the game info
-                    date_str = game.datetime.strftime("%A, %B %d")
+                    weekday = game.datetime.strftime("%A")
+                    month = game.datetime.strftime("%B")
+                    day = str(game.datetime.day)  # This will not have leading zeros
+                    date_str = f"{weekday}, {month} {day}"
                     time_str = game.datetime.strftime("%I:%M %p")
                     game_line = (
                         f"{date_str} {time_str}\n"
-                        f"{EMOJI_DISC} {team.name} {home_away} {opponent.name}\n"
+                        f"{EMOJI_DISC} {team_name} {home_away} {opponent.name}\n"
                         f"{EMOJI_MAP} {game.park}, Field {game.field}\n"
                     )
                     schedule_msg.append(game_line)
@@ -747,10 +858,15 @@ async def bot_add_player(ctx, *, args):
             player = session.query(Player).filter_by(id=player_id).first()
             if not player:
                 raise ValueError(f"Player {player_id} not found")
+
+            # Verify the team exists
+            team = session.query(Team).filter_by(id=team_id).first()
+            if not team:
+                raise ValueError(f"Team {team_id} not found")
             
-            player.team_id = team_id
-            session.commit()
-            await ctx.send(f"Player {player_id} added to team {team_id}")
+            # Use add_player_to_team to properly set up the relationship
+            add_player_to_team(session, team_id, player)
+            await ctx.send(f"Player {player_id} ({player.real_first} {player.real_last}) added to team {team_id} ({team.name})")
 
     except Exception as e:
         await ctx.send(f"Error adding player to team: {str(e)}")
@@ -771,8 +887,7 @@ async def bot_add_player(ctx, *, args):
 @is_privileged()
 async def bot_create_game(ctx, *, args):
     try:
-        params = parse_args(args)
-        
+
         # Parse arguments
         params = parse_args(args)
         
@@ -783,6 +898,8 @@ async def bot_create_game(ctx, *, args):
         time_str = params.get('time', '').strip('"')
         park = params.get('park', '').strip('"')
         field = int(params.get('field', 0))
+
+        print(f"Creating game: away={away_team_id}, home={home_team_id}, date={date_str}, time={time_str}, park={park}, field={field}", flush=True)
 
         # Validate each parameter individually
         if not away_team_id:
@@ -818,7 +935,7 @@ async def bot_create_game(ctx, *, args):
             # After creating the game, schedule a game alert
             team1 = session.query(Team).filter_by(id=away_team_id).first()
             team2 = session.query(Team).filter_by(id=home_team_id).first()
-            
+            print("#### TODO __ FIX THE SCHEDULER.", flush=True)
             # Schedule the game announcement
             scheduler.add_job(
                 post_gametime_message,
@@ -966,8 +1083,47 @@ async def on_ready():
     scheduler.start()
     
     channel = bot.get_channel(BOT_COMMS_CHANNEL_ID) or await bot.fetch_channel(BOT_COMMS_CHANNEL_ID)
-    await channel.send("I'm... alive!")
+    await channel.send("I'm... alive!") 
 
+@bot.event
+async def on_raw_reaction_add(payload):
+    """Handle reaction adds for role assignment."""
+    if payload.user_id == bot.user.id:
+        return
+    
+    try:
+        channel = await bot.fetch_channel(payload.channel_id)
+        message = await channel.fetch_message(payload.message_id)
+        
+        # Check if this is a game announcement message
+        if not message.author.id == bot.user.id or not message.content.startswith("```\n🥏 🥏 GAME ALERT!!"):
+            return
+
+        # Get game ID from message (you'll need to store this in the message)
+        game_id = extract_game_id(message.content)
+        
+        # Get player from discord ID
+        with SessionLocal() as session:
+            player = get_player_by_discord(session, str(payload.user_id))
+            if not player:
+                return
+
+            # Set attendance based on reaction
+            if str(payload.emoji) in YES_EMOJI_LIST:
+                status = AttendanceStatus.ATTENDING
+            elif str(payload.emoji) in NO_EMOJI_LIST:
+                status = AttendanceStatus.NOT_ATTENDING
+            else:
+                return
+
+            # Update attendance
+            set_attendance_status(session, game_id, player.id, status)
+            
+        # Update message with new attendance
+        await update_game_message(message, game_id)
+
+    except Exception as e:
+        print(f"Error handling reaction: {e}", flush=True)
 
 if __name__ == "__main__":
     try:

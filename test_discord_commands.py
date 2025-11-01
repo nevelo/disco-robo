@@ -5,7 +5,7 @@ from unittest.mock import Mock, patch
 from datetime import datetime
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
-from models import Base, Team, Player, Game, Genders, AttendanceStatus
+from models import Base, Team, Player, Game, Genders, AttendanceStatus, Attendance
 from db_utils import UNKNOWN_DISCORD, get_game_attendance
 
 # Test data for commands
@@ -31,6 +31,56 @@ VALID_COMMANDS = [
     '!add_player player=5 team=1',  # James to Cobra Snakes
     '!add_player player=6 team=1',  # Emily to Cobra Snakes
     '!add_player player=7 team=1',  # Sam to Cobra Snakes
+]
+
+VALID_COMMANDS_2 = [
+    # Create teams
+    '!create_team name="Disc Wizards" year=2026 season="Winter I" home_colour="white" away_colour="black"',
+    '!create_team name="Storm Chasers" year=2026 season="Winter I" home_colour="red" away_colour="red"',
+    '!create_team name="Gravity Breakers" year=2026 season="Winter I" home_colour="white" away_colour="black"',
+    '!create_team name="Wind Warriors" year=2026 season="Winter I" home_colour="white" away_colour="black"',
+    '!create_team name="Sky Raiders" year=2026 season="Winter I" home_colour="orange" away_colour="orange"',
+    '!create_team name="Spiral Force" year=2026 season="Winter I" home_colour="purple" away_colour="purple"',
+    '!create_team name="Cloud Runners" year=2026 season="Winter I" home_colour="white" away_colour="black"',
+    '!create_team name="Air Masters" year=2026 season="Winter I" home_colour="white" away_colour="black"',
+    
+    # Create players
+    '!create_player first="Marcus" last="Thompson" gender="m" discord="mthompson_92"',
+    '!create_player first="Nina" last="Chen" gender="f" discord="ninachen_"',
+    '!create_player first="Rebecca" last="Martinez" gender="f" discord="becca528"',
+    '!create_player first="Daniel" last="Parker" gender="m" discord="dparker807"',
+    '!create_player first="Thomas" last="Wright" gender="m" discord="twright054"',
+    '!create_player first="Sophia" last="Anderson" gender="f" discord="sophiaa"',
+    '!create_player first="Lucas" last="Cooper" gender="m" discord="lc660"',
+    '!create_player first="Emma" last="Fisher" gender="f" discord="emmafisher"',
+    '!create_player first="Ryan" last="Mitchell" gender="m" discord="ryan_33"',
+    '!create_player first="Isabel" last="Turner" gender="f" discord="isaturner"',
+    '!create_player first="Michael" last="Hayes" gender="m" discord="mhayes"',
+    '!create_player first="Robert" last="Bennett" gender="m" discord="rbennett97"',
+    
+    # Add players to team 1 (Disc Wizards)
+    '!add_player player=1 team=1',  # Marcus Thompson
+    '!add_player player=2 team=1',  # Nina Chen
+    '!add_player player=3 team=1',  # Rebecca Martinez
+    '!add_player player=4 team=1',  # Daniel Parker
+    '!add_player player=5 team=1',  # Thomas Wright
+    '!add_player player=6 team=1',  # Sophia Anderson
+    '!add_player player=7 team=1',  # Lucas Cooper
+    '!add_player player=8 team=1',  # Emma Fisher
+    '!add_player player=9 team=1',  # Ryan Mitchell
+    '!add_player player=10 team=1', # Isabel Turner
+    '!add_player player=11 team=1', # Michael Hayes
+    '!add_player player=12 team=1', # Robert Bennett
+    
+    # Create games
+    '!create_game away=1 home=5 date="2025-10-26" time="19:00" park="Riverside" field=1',
+    '!create_game away=7 home=1 date="2025-11-02" time="20:00" park="Riverside" field=1',
+    '!create_game away=6 home=1 date="2025-11-09" time="16:00" park="Riverside" field=1',
+    '!create_game away=1 home=8 date="2025-11-16" time="19:00" park="Riverside" field=2',
+    '!create_game away=1 home=4 date="2025-11-23" time="21:00" park="Riverside" field=2',
+    '!create_game away=1 home=3 date="2025-11-30" time="16:00" park="Riverside" field=2',
+    '!create_game away=2 home=1 date="2025-12-07" time="16:00" park="Riverside" field=2',
+    '!create_game away=5 home=1 date="2025-12-14" time="20:00" park="Riverside" field=1'
 ]
 
 class CommandIterator:
@@ -168,7 +218,6 @@ class TestDiscordCommands(unittest.TestCase):
         self.config_patch.stop()
         Base.metadata.drop_all(self.engine)
         self.engine.dispose()
-        print("\n ------------------------")
 
     def run_async_test(self, coro):
         import asyncio
@@ -182,7 +231,35 @@ class TestDiscordCommands(unittest.TestCase):
         """Implementation of attendance workflow test"""
         # First set up the database with our test data
         for command in VALID_COMMANDS:
-            await self.execute_command(command)
+            await self.execute_command(command, verbose=False)
+
+        # Verify that all players were added to the team correctly
+        with self.Session() as session:
+            cobra_snakes = session.query(Team).filter_by(name="Cobra Snakes").first()
+            self.assertIsNotNone(cobra_snakes, "Cobra Snakes team not found")
+
+            # Get all players that should be on the team
+            expected_players = {
+                "johna1234": "John Agda",
+                "sconnor": "Sarah Connor",
+                "akim": "Alex Kim",
+                "mrodriguez": "Maria Rodriguez",
+                UNKNOWN_DISCORD: "James Wilson",
+                "echen123": "Emily Chen",
+                "staylor": "Sam Taylor"
+            }
+
+            # Verify each player is on the team
+            team_players = {p.discord_username: f"{p.real_first} {p.real_last}" for p in cobra_snakes.players}
+            self.assertEqual(set(expected_players.keys()), set(team_players.keys()),
+                           f"Team roster mismatch.\nExpected players: {sorted(expected_players.keys())}\n"
+                           f"Actual players: {sorted(team_players.keys())}")
+
+            # Verify player details are correct
+            for discord_id, full_name in expected_players.items():
+                self.assertIn(discord_id, team_players, f"Player {full_name} not found in team")
+                self.assertEqual(team_players[discord_id], full_name,
+                               f"Name mismatch for {discord_id}. Expected {full_name}, got {team_players[discord_id]}")
 
         # Verify that all players start in PENDING state
         with self.Session() as session:
@@ -220,7 +297,6 @@ class TestDiscordCommands(unittest.TestCase):
                 .filter(Game.datetime == datetime(2025, 11, 30, 19, 30))\
                 .first()
             game_id = game.id
-
             attendance_commands = [
                 (f'!set_attendance game={game_id} player={players["johna1234"]} status=yes', 'johna1234'),  # John attending
                 (f'!attendance game={game_id}', None),  # Check status
@@ -235,35 +311,47 @@ class TestDiscordCommands(unittest.TestCase):
                 (f'!set_attendance game={game_id} player={players["staylor"]} status=no', 'staylor'),  # Sam not attending
                 (f'!attendance game={game_id}', None),  # Final status check
             ]
-
-        print("\nAttendance Command Test Outputs:")
-        print("--------------------------------")
         
         # Keep track of current attendance state for verification
-        expected_attending = []
-        expected_not_attending = []
-        
+        expected_attending_usernames = []
+        expected_not_attending_usernames = []
+        expected_pending_usernames = []
+
         # Execute each command and display output
         for command, username in attendance_commands:
             if username:
                 # Set author for attendance setting commands
                 self.ctx.author = Mock(name=username)
-                messages = await self.execute_command(command, verbose=True)
+                messages = await self.execute_command(command, verbose=False)
                 self.assertTrue(any("status set" in msg for msg in messages), 
                               f"Expected success message for {command}")
                 
+                # Verify the database was updated correctly
+                with self.Session() as session:
+                    game = session.query(Game).filter(Game.id == game_id).first()
+                    player = session.query(Player).filter_by(discord_username=username).first()
+                    attendance = session.query(Attendance).filter_by(
+                        game_id=game_id,
+                        player_id=player.id
+                    ).first()
+                    self.assertTrue(attendance is not None and 
+                                  attendance.status == (AttendanceStatus.ATTENDING if "status=yes" in command 
+                                                     else AttendanceStatus.NOT_ATTENDING),
+                                  f"Expected player {username} to have status {'ATTENDING' if 'status=yes' in command else 'NOT_ATTENDING'} "
+                                  f"for game {game_id}")
+                
+                    current_game_attendance = get_game_attendance(session, game_id, include_details=False)
+
                 # Update our expected state
                 status = "yes" if "status=yes" in command else "no"
                 if status == "yes":
-                    expected_attending.append(username)
+                    expected_attending_usernames.append(username)
                 else:
-                    expected_not_attending.append(username)
-                print(f"\nCommand: {command}")
-                print(f"Expected attending: {expected_attending}")
-                print(f"Expected not attending: {expected_not_attending}")
+                    expected_not_attending_usernames.append(username)
+                
             else:
                 # This is an attendance check - verify the output format and content
-                messages = await self.execute_command(command, verbose=True)
+                messages = await self.execute_command(command, verbose=False)
                 
                 # There should be exactly one message with the attendance info
                 self.assertEqual(len(messages), 1, "Expected exactly one response message")
@@ -305,27 +393,38 @@ class TestDiscordCommands(unittest.TestCase):
                     def format_player(p):
                         return f"{p.real_first} {p.real_last} ({p.discord_username})" if p.discord_username != UNKNOWN_DISCORD else f"{p.real_first} {p.real_last}"
                     
-                    expected_attending = [format_player(p) for p in attendance["attending"]]
-                    expected_not_attending = [format_player(p) for p in attendance["not_attending"]]
-                    expected_pending = [format_player(p) for p in attendance["pending"]]
+                    current_attending_names = sorted([format_player(p) for p in attendance["attending"]])
+                    current_not_attending_names = sorted([format_player(p) for p in attendance["not_attending"]])
+                    current_pending_names = sorted([format_player(p) for p in attendance["pending"]])
                     
-                    # Verify counts
-                    self.assertEqual(len(attending), len(expected_attending), 
-                                   f"Wrong number of attending players. Expected {len(expected_attending)}, got {len(attending)}")
-                    self.assertEqual(len(not_attending), len(expected_not_attending), 
-                                   f"Wrong number of not attending players. Expected {len(expected_not_attending)}, got {len(not_attending)}")
-                    self.assertEqual(len(pending), len(expected_pending), 
-                                   f"Wrong number of pending players. Expected {len(expected_pending)}, got {len(pending)}")
+                    # Convert the bot output lists to sorted lists for comparison
+                    output_attending = sorted(attending)
+                    output_not_attending = sorted(not_attending)
+                    output_pending = sorted(pending)
                     
-                    # Verify correct players in each section
-                    self.assertEqual(set(attending), set(expected_attending), 
-                                   "Attending list doesn't match expected players")
-                    self.assertEqual(set(not_attending), set(expected_not_attending), 
-                                   "Not attending list doesn't match expected players")
-                    self.assertEqual(set(pending), set(expected_pending), 
-                                   "Pending list doesn't match expected players")
-
-        # Print actual database state at the end
+                    # Verify the bot's output matches the database state
+                    self.assertEqual(current_attending_names, output_attending,
+                                   f"Attending list mismatch\nExpected: {current_attending_names}\nGot: {output_attending}")
+                    self.assertEqual(current_not_attending_names, output_not_attending,
+                                   f"Not attending list mismatch\nExpected: {current_not_attending_names}\nGot: {output_not_attending}")
+                    self.assertEqual(current_pending_names, output_pending,
+                                   f"Pending list mismatch\nExpected: {current_pending_names}\nGot: {output_pending}")
+                    
+                    # Also verify against our running expected state
+                    # Convert usernames to full player names for comparison
+                    username_to_full_name = {p.discord_username: format_player(p) 
+                                           for p in session.query(Player).all() 
+                                           if p.discord_username != UNKNOWN_DISCORD}
+                    
+                    expected_attending_names = sorted([username_to_full_name[u] for u in expected_attending_usernames])
+                    expected_not_attending_names = sorted([username_to_full_name[u] for u in expected_not_attending_usernames])
+                    
+                    self.assertEqual(current_attending_names, expected_attending_names,
+                                   f"Attendance state mismatch\nExpected attending: {expected_attending_names}\nGot: {current_attending_names}")
+                    self.assertEqual(current_not_attending_names, expected_not_attending_names,
+                                   f"Not attending state mismatch\nExpected: {expected_not_attending_names}\nGot: {current_not_attending_names}")
+                    
+            # Print actual database state at the end
         with self.Session() as session:
             game = session.query(Game).filter(Game.datetime == datetime(2025, 11, 30, 19, 30)).first()
             attendance_records = {
@@ -340,13 +439,17 @@ class TestDiscordCommands(unittest.TestCase):
                                   if status == AttendanceStatus.NOT_ATTENDING}
             
             # Verify the states match our expectations
-            self.assertEqual(set(actual_attending), set(expected_attending),
-                           f"Attending players don't match.\nExpected: {expected_attending}\nGot: {actual_attending}")
-            self.assertEqual(set(actual_not_attending), set(expected_not_attending),
-                           f"Not attending players don't match.\nExpected: {expected_not_attending}\nGot: {actual_not_attending}")
+            self.assertEqual(set(expected_attending_usernames), actual_attending,
+                           f"Attending players don't match.\nExpected: {expected_attending_usernames}\nGot: {actual_attending}")
+            self.assertEqual(set(expected_not_attending_usernames), actual_not_attending,
+                           f"Not attending players don't match.\nExpected: {expected_not_attending_usernames}\nGot: {actual_not_attending}")
             
             # Verify James Wilson (no discord) is still pending (no record)
-
+            james = session.query(Player).filter_by(discord_username=UNKNOWN_DISCORD).first()
+            self.assertIsNotNone(james, "Could not find James Wilson (player with no Discord)")
+            self.assertNotIn(james.id, [rec.player_id for rec in game.attendances],
+                           "Expected James Wilson to still be pending (no attendance record)")
+            
     async def execute_command(self, command=None, expect_error=False, verbose=False):
         """Execute a command and verify its result.
         
@@ -699,4 +802,82 @@ class TestDiscordCommands(unittest.TestCase):
                 self.assertIsNotNone(player)
                 self.assertEqual(player.real_first, "John")
                 self.assertEqual(player.real_last, "Rom")
+        self.run_async_test(run_test())
+
+    def test_winter_2026_league(self):
+        """Test the complete Winter 2026 league setup with teams, players, and games"""
+        async def run_test():
+            # Execute all commands from VALID_COMMANDS_2
+            for command in VALID_COMMANDS_2:
+                responses = await self.execute_command(command, verbose=True)
+                print(responses)
+                self.assertTrue(any("created successfully" in msg.lower() or "added to team" in msg.lower() for msg in responses), 
+                              f"Command failed: {command}")
+
+            # Test roster for Big Disc Energy (team 1)
+            roster_command = '!roster id=1'
+            responses = await self.execute_command(roster_command)
+            print(responses)
+            roster_text = '\n'.join(responses)
+            
+            print("\n=== Big Disc Energy Roster ===")
+            print(roster_text)
+            print("=== End Roster ===\n")
+            
+            # Verify roster content
+            self.assertIn("Team Roster: Big Disc Energy", roster_text)
+            
+            # Verify roster content
+            self.assertIn("Team Roster: Disc Wizards", roster_text)
+
+            # Female matching players
+            self.assertIn("Nina Chen (ninachen_)", roster_text)
+            self.assertIn("Rebecca Martinez (becca528)", roster_text)
+            self.assertIn("Sophia Anderson (sophiaa)", roster_text)
+            self.assertIn("Emma Fisher (emmafisher)", roster_text)
+            self.assertIn("Isabel Turner (isaturner)", roster_text)
+
+            # Open matching players
+            self.assertIn("Marcus Thompson (mthompson_92)", roster_text)
+            self.assertIn("Daniel Parker (dparker807)", roster_text)
+            self.assertIn("Thomas Wright (twright054)", roster_text)
+            self.assertIn("Lucas Cooper (lc660)", roster_text)
+            self.assertIn("Ryan Mitchell (ryan_33)", roster_text)
+            self.assertIn("Michael Hayes (mhayes)", roster_text)
+            self.assertIn("Robert Bennett (rbennett97)", roster_text)
+
+            # Test schedule
+            schedule_command = '!schedule'
+            responses = await self.execute_command(schedule_command)
+            print(responses)
+            schedule_text = '\n'.join(responses)
+            
+            print("\n=== League Schedule ===")
+            print(schedule_text)
+            print("=== End Schedule ===\n")
+            
+            # Verify all teams appear in schedule
+            self.assertIn("Disc Wizards", schedule_text)
+            self.assertIn("Storm Chasers", schedule_text)
+            self.assertIn("Gravity Breakers", schedule_text)
+            self.assertIn("Wind Warriors", schedule_text)
+            self.assertIn("Sky Raiders", schedule_text)
+            self.assertIn("Spiral Force", schedule_text)
+            self.assertIn("Cloud Runners", schedule_text)
+            self.assertIn("Air Masters", schedule_text)
+            
+            # Verify all game dates appear
+            self.assertIn("October 26", schedule_text)
+            self.assertIn("November 2", schedule_text)
+            self.assertIn("November 9", schedule_text)
+            self.assertIn("November 16", schedule_text)
+            self.assertIn("November 23", schedule_text)
+            self.assertIn("November 30", schedule_text)
+            self.assertIn("December 7", schedule_text)
+            self.assertIn("December 14", schedule_text)
+            
+            # Verify field locations
+            self.assertIn("Riverside, Field 1", schedule_text)
+            self.assertIn("Riverside, Field 2", schedule_text)
+
         self.run_async_test(run_test())

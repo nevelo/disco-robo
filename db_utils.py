@@ -7,19 +7,8 @@ from models import Team, Player, Game, Attendance, AttendanceStatus, Genders
 UNKNOWN_DISCORD = "pending_discord"  # Local constant used by both disco-robo.py and this module
 UNKNOWN_NAME = "Unknown Player"
 
-# Delete a team and all its relationships.
-def delete_team(
-    session: Session,
-    team: Team
-) -> None:  
-    """Delete a team and all its relationships."""
-    # Delete all games associated with this team
-    for game in team.games_as_away + team.games_as_home:
-        session.delete(game)
-    
-    # The player-team associations will be automatically deleted due to SQLAlchemy cascade
-    session.delete(team)
-    session.commit()
+
+##### TEAM FUNCTIONS #####
 
 # Create a new team. 
 def create_team(
@@ -41,6 +30,87 @@ def create_team(
     session.add(team)
     session.commit()
     return team
+
+def edit_team(
+    session: Session,
+    team_id: int,
+    name: Optional[str] = None,
+    year: Optional[int] = None,
+    season: Optional[str] = None,
+    home_colour: Optional[str] = None,
+    away_colour: Optional[str] = None
+) -> Optional[Team]:
+    """Edit an existing team's details."""
+    team = session.query(Team).filter_by(id=team_id).first()
+    if not team:
+        return None
+    
+    if name is not None:
+        team.name = name
+    if year is not None:
+        team.year = year
+    if season is not None:
+        team.season = season
+    if home_colour is not None:
+        team.home_colour = home_colour
+    if away_colour is not None:
+        team.away_colour = away_colour
+    
+    session.commit()
+    return team
+
+# Delete a team and all its relationships.
+def delete_team(
+    session: Session,
+    team: Team
+) -> None:  
+    """Delete a team and all its relationships."""
+    # Delete all games associated with this team
+    for game in team.games_as_away + team.games_as_home:
+        session.delete(game)
+    
+    # The player-team associations will be automatically deleted due to SQLAlchemy cascade
+    session.delete(team)
+    session.commit()
+
+def get_team_data(
+    session: Session,
+    team_id: int,
+    param: str = "name"
+) -> Optional[str]:
+    """Get specific data about a team.
+    
+    Args:
+        session: SQLAlchemy session
+        team_id: ID of the team
+        param: Data parameter to retrieve ('name', 'year', 'season', 'home_colour', 'away_colour')
+        
+    Returns:
+        The requested data as a string, or None if not found
+    """
+    team = session.query(Team).filter_by(id=team_id).first()
+    if not team:
+        return None
+    
+    if param == "name":
+        return team.name
+    elif param == "year":
+        return str(team.year)
+    elif param == "season":
+        return team.season
+    elif param == "home_colour":
+        return team.home_colour
+    elif param == "away_colour":
+        return team.away_colour
+    elif param == None:
+        return None
+    else:
+        raise ValueError("Invalid parameter")
+    
+
+
+
+##### PLAYER FUNCTIONS #####
 
 # Create a new player.
 def create_player(
@@ -86,7 +156,6 @@ def create_player(
     return player
 
 # Edit an existing player's details.
-# NOT YET IMPLEMENTED
 def edit_player(
     session: Session,
     player_id: int,
@@ -117,6 +186,59 @@ def edit_player(
     
     session.commit()
     return player
+
+def delete_player(
+    session: Session,
+    player_id: int
+) -> None:
+    """Delete a player and all their attendance records."""
+    player = session.query(Player).filter_by(id=player_id).first()
+    if not player:
+        raise ValueError(f"Player with ID {player_id} not found")
+    
+    # Delete all attendance records for this player
+    session.query(Attendance).filter_by(player_id=player_id).delete()
+    
+    # Remove player from all teams
+    for team in player.teams:
+        team.players.remove(player)
+    
+    # Delete the player
+    session.delete(player)
+    session.commit()
+
+def get_player_data(
+    session: Session,
+    player_id: int,
+    param: str = "discord_username"
+) -> Optional[str]:
+    """Get specific data about a player.
+    
+    Args:
+        session: SQLAlchemy session
+        player_id: ID of the player
+        param: Data parameter to retrieve ('discord_username', 'real_first', 'real_last', 'gender')
+    """
+    player = session.query(Player).filter_by(id=player_id).first()
+    if not player:
+        return None
+
+    if param == "discord_username":
+        return player.discord_username
+    elif param == "real_first":
+        return player.real_first
+    elif param == "real_last":
+        return player.real_last
+    elif param == "gender":
+        return player.gender
+    elif param == None:
+        return None
+    else:
+        raise ValueError("Invalid parameter")
+    
+
+
+##### GAME FUNCTIONS #####
 
 # Create a new game and initialize attendance records for all players.
 def create_game(
@@ -351,15 +473,16 @@ def get_game_attendance(
     # Get all players from both teams
     players = []
     teams = [game.hometeam, game.awayteam] if team_id == -1 else [team for team in [game.hometeam, game.awayteam] if team.id == team_id]
+
     if not teams:
         raise ValueError(f"Team with ID {team_id} not found in this game")
     for team in teams:
         players.extend(team.players)
-    
+
     # Get all attendance records for this game
     attendances = session.query(Attendance).filter_by(game_id=game_id).all()
     attendance_by_player = {a.player_id: a for a in attendances}
-    
+
     # Process each player
     for player in players:
         attendance = attendance_by_player.get(player.id)
@@ -432,3 +555,38 @@ def remove_player_from_team(
             .delete()
     
     session.commit()
+    
+def get_game_data(
+    session: Session,
+    game_id: int,
+    param: str = "datetime"
+) -> Optional[str]:
+    """Get specific data about a game.
+    
+    Args:
+        session: SQLAlchemy session
+        game_id: ID of the game
+        param: Data parameter to retrieve ('datetime', 'park', 'field', 'awayteam_id', 'hometeam_id')
+        
+    Returns:
+        The requested data as a string, or None if not found
+    """
+    game = session.query(Game).filter_by(id=game_id).first()
+    if not game:
+        return None
+    
+    if param == "datetime":
+        return game.datetime.isoformat()
+    elif param == "park":
+        return game.park
+    elif param == "field":
+        return str(game.field)
+    elif param == "awayteam_id":
+        return str(game.awayteam_id)
+    elif param == "hometeam_id":
+        return str(game.hometeam_id)
+    elif param == None:
+        return None
+    else:
+        raise ValueError("Invalid parameter")
+    
