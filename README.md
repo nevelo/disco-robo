@@ -20,7 +20,7 @@ TBD
 #### Connecting to your server
 
 ##### Giving Discord permissions to your bot
-- writing your config/.env file
+- writing your config/config.json file
 - getting your DISCORD_TOKEN from Discord
 - Getting CHANNEL_IDs
 - 

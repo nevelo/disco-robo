@@ -1,11 +1,35 @@
 from datetime import datetime
 from typing import Optional, List
 from sqlalchemy.orm import Session
-from models import Team, Player, Game, Attendance, AttendanceStatus, Genders
+from sqlalchemy import or_
+from models import Team, Player, Game, Attendance, AttendanceStatus, Genders, MessageType
 
 # Constants for unknown/placeholder values
 UNKNOWN_DISCORD = "pending_discord"  # Local constant used by both disco-robo.py and this module
 UNKNOWN_NAME = "Unknown Player"
+
+
+def get_game_from_message(session: Session, message_id: str) -> Optional[Game]:
+    """Find a game associated with a Discord message ID.
+    
+    Args:
+        session: SQLAlchemy database session
+        message_id: Discord message ID as string
+        
+    Returns:
+        Game object if found, None if no game is associated with this message
+    """
+    # Check all message columns for this message ID
+    game = session.query(Game).filter(
+        or_(
+            Game.announcement_msg == message_id,
+            Game.bother_msg == message_id,
+            Game.pester_msg == message_id,
+            Game.gameday_msg == message_id
+        )
+    ).first()
+    
+    return game
 
 
 ##### TEAM FUNCTIONS #####
@@ -119,6 +143,7 @@ def create_player(
     last_name: str,
     gender: str,
     discord_username: Optional[str] = None,
+    discord_id: Optional[str] = None,
     initial_team_id: Optional[int] = None
 ) -> Player:
     """Create a new player and optionally add them to a team.
@@ -142,6 +167,7 @@ def create_player(
         real_first=first_name,
         real_last=last_name,
         discord_username=discord_username or UNKNOWN_DISCORD,
+        discord_id=discord_id or UNKNOWN_DISCORD,
         gender=gender_enum
     )
     session.add(player)
@@ -162,7 +188,8 @@ def edit_player(
     first_name: Optional[str] = None,
     last_name: Optional[str] = None,
     gender: Optional[str] = None,
-    discord_username: Optional[str] = None
+    discord_username: Optional[str] = None,
+    discord_id: Optional[str] = None
 )   -> Optional[Player]:
     # First retrieve the player
     player = session.query(Player).filter_by(id=player_id).first()
@@ -183,7 +210,8 @@ def edit_player(
             raise ValueError("Gender must be 'm', 'f', or 'o'")
     if discord_username is not None:
         player.discord_username = discord_username
-    
+    if discord_id is not None:
+        player.discord_id = discord_id
     session.commit()
     return player
 
@@ -225,6 +253,8 @@ def get_player_data(
 
     if param == "discord_username":
         return player.discord_username
+    elif param == "discord_id":
+        return player.discord_id
     elif param == "real_first":
         return player.real_first
     elif param == "real_last":
@@ -429,15 +459,15 @@ def get_player(
     """
     return session.query(Player).filter_by(id=player_id).first()
 
-def get_player_by_discord(
+def get_player_by_discord_id(
     session: Session,
-    discord_username: str
+    discord_id: str
 ) -> Optional[Player]:
     """
-    Get a player by their Discord username.
+    Get a player by their Discord ID.
     Returns None if player not found.
     """
-    return session.query(Player).filter_by(discord_username=discord_username).first()
+    return session.query(Player).filter_by(discord_id=discord_id).first()
 
 def get_game_attendance(
     session: Session,
@@ -589,4 +619,3 @@ def get_game_data(
         return None
     else:
         raise ValueError("Invalid parameter")
-    

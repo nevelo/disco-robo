@@ -11,6 +11,12 @@ class AttendanceStatus(enum.Enum):
     ATTENDING = "yes"       # Confirmed attending
     NOT_ATTENDING = "no"    # Confirmed not attending
 
+class MessageType(enum.Enum):
+    GAME_ANNOUNCEMENT = "game_announcement"
+    BOTHER_MSG = "bother_msg"
+    PESTER_MSG = "pester_msg"
+    GAMEDAY_REMINDER = "gameday_reminder"
+
 class Genders(enum.Enum):
     OPEN_MATCHING = "m"
     FEMALE_MATCHING = "f"
@@ -61,6 +67,8 @@ class Player(Base):
     real_first = Column(String, nullable=False)
     real_last = Column(String, nullable=False)
     gender = Column(Enum(Genders), nullable=False)
+    shortname = Column(String, nullable=True)  # Optional nickname
+    discord_id = Column(String, nullable=False, unique=True)  # Discord user ID
 
     # Many-to-many: Player <-> Teams through player_team_association
     teams = relationship(
@@ -86,6 +94,10 @@ class Game(Base):
     datetime = Column(DateTime, nullable=False)
     park = Column(String, nullable=False)
     field = Column(Integer, nullable=False)
+    announcement_msg = Column(String, nullable=True)  # Discord message ID for the announcement
+    bother_msg = Column(String, nullable=True)        # Discord message ID for the bother message
+    pester_msg = Column(String, nullable=True)       # Discord message ID for the pester message
+    gameday_msg = Column(String, nullable=True)       # Discord message ID for the gameday reminder
 
     # Two participating teams
     awayteam_id = Column(Integer, ForeignKey("teams.id"), nullable=False)
@@ -94,12 +106,10 @@ class Game(Base):
     # Relationships
     awayteam = relationship("Team", back_populates="games_as_away", foreign_keys=[awayteam_id])
     hometeam = relationship("Team", back_populates="games_as_home", foreign_keys=[hometeam_id])
-
-    # Relationship with Attendance
     attendances = relationship("Attendance", back_populates="game")
 
     def __repr__(self):
-        return f"<Game({self.team1.name} vs {self.team2.name} @ {self.datetime})>"
+        return f"<Game({self.awayteam.name} vs {self.hometeam.name} @ {self.datetime})>"
 
 class Attendance(Base):
     __tablename__ = "attendance"

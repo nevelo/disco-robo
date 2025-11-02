@@ -2,14 +2,15 @@ import os
 import asyncio
 import json
 import shlex
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import List, Optional
 from dotenv import load_dotenv
-from discord.ext import commands
-from discord import Intents
+from discord.ext import commands, tasks
+from discord import Intents, NotFound
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 from sqlalchemy.orm import Session
+from sqlalchemy import and_
 from models import (
     SessionLocal, Player, Game, Team,
     init_db, dispose_db, Genders, AttendanceStatus
@@ -18,6 +19,7 @@ from db_utils import (
     create_team, edit_team, delete_team, get_team_data,
     create_player, edit_player, delete_player, get_player_data,
     create_game, edit_game, delete_game, get_game_data,
+    get_game_from_message, get_player_by_discord_id,
     set_attendance_status,
     get_team_games,
     get_team_roster,
@@ -26,12 +28,16 @@ from db_utils import (
     UNKNOWN_DISCORD
 )
 
-# Load environment variables
-load_dotenv("config/.env")
-TOKEN = os.getenv("DISCORD_TOKEN")
-CHANNEL_ID = int(os.getenv("CHANNEL_ID"))
-BOT_COMMS_CHANNEL_ID = int(os.getenv("BOT_COMMS_CHANNEL_ID"))
-DB_URL = os.getenv("DATABASE_URL", "sqlite:///disc_bot.db")
+DISCORD_TOKEN = None
+DATABASE_URL = None
+LOGFILE = None
+TRACKED_TEAMS = []
+PRIVILEGED_USERS = []
+TIMEZONE = "America/Toronto"
+CHANNELS = {
+    "announcements": None,
+    "bot_commands": None,
+}
 
 # Load configuration from JSON file
 def load_config() -> dict:
@@ -41,18 +47,50 @@ def load_config() -> dict:
     except FileNotFoundError:
         print("Warning: config.json not found. Creating default config file.")
         default_config = {
+            "discord_token": None,
+            "database_url": "db/disco_robo.db",
+            "logfile": "logs/disco_robo.log",
             "tracked_teams": [],
             "privileged_users": [],
             "timezone": "America/Toronto",
             "channels": {
                 "announcements": None,
-                "bot_commands": None
-            }
+                "bot_commands": None,
+            },
         }
         os.makedirs('config', exist_ok=True)
         with open('config/config.json', 'w') as f:
             json.dump(default_config, f, indent=4)
         return default_config
+
+def read_config() -> dict:
+    config = load_config()
+    DISCORD_TOKEN = config.get("discord_token", DISCORD_TOKEN)
+    DATABASE_URL = config.get("database_url", DATABASE_URL)
+    LOGFILE = config.get("logfile", LOGFILE)
+    TRACKED_TEAMS = config.get("tracked_teams", TRACKED_TEAMS)
+    PRIVILEGED_USERS = config.get("privileged_users", PRIVILEGED_USERS)
+    TIMEZONE = config.get("timezone", TIMEZONE)
+    CHANNELS["announcements"] = config.get("channels", CHANNELS).get("announcements", None)
+    CHANNELS["bot_commands"] = config.get("channels", CHANNELS).get("bot_commands", None)   
+    return config
+
+def get_timezone() -> str:
+    """Get the timezone from config."""
+    config = load_config()
+    return config.get("timezone", "America/Toronto")
+
+def get_announcement_channel_id() -> Optional[int]:
+    """Get the announcements channel ID from config."""
+    config = load_config()
+    channels = config.get("channels", {})
+    return channels.get("announcements", None)
+
+def get_comms_channel_id() -> Optional[int]:
+    """Get the bot communications channel ID from config."""
+    config = load_config()
+    channels = config.get("channels", {})
+    return channels.get("bot_commands", None)
 
 # Get tracked teams from config
 def get_tracked_teams() -> List[int]:
@@ -119,7 +157,7 @@ circles = {
     "rainbow": "\U0001F308",
 }
 
-async def post_gametime_message(game_id: int):
+async def send_game_announcement(game_id: int):
     with SessionLocal() as session:
         home_id = get_game_data(session, game_id, "hometeam_id")
         if (home_id == None):
@@ -133,7 +171,7 @@ async def post_gametime_message(game_id: int):
         away_colour = get_team_data(session, away_id, "away_colour")
         home_colour = get_team_data(session, home_id, "home_colour")    
 
-    await post_gametime_message(
+    await send_game_announcement(
         game_id=game_id,
         awayteam=awayteam,
         hometeam=hometeam,
@@ -144,7 +182,7 @@ async def post_gametime_message(game_id: int):
         field=field
     )
 
-async def post_gametime_message(
+async def send_game_announcement(
     game_id: int,
     awayteam: str,
     hometeam: str,
@@ -155,7 +193,7 @@ async def post_gametime_message(
     field: int
 ):
     """Post initial game announcement and return the message for reaction tracking"""
-    channel = bot.get_channel(CHANNEL_ID) or await bot.fetch_channel(CHANNEL_ID)
+    channel = bot.get_channel(CHANNELS["announcements"]) or await bot.fetch_channel(CHANNELS["announcements"])
     team_colour_emoji = circles.get(team_colour, CONFUSED_EMOJI)
     opp_colour_emoji = circles.get(opp_colour, CONFUSED_EMOJI)
 
@@ -220,42 +258,7 @@ async def send_day_of_game_reminder_message(game_id: int):
     # Send reminder to all attending players
     return
 
-def schedule_game_notifications(game_id: int, game_time: datetime):
-    """Schedule all notifications for a game"""
-    # Schedule initial announcement (3 days before)
-    announcement_time = game_time - timedelta(days=3)
-    scheduler.add_job(
-        post_gametime_message,
-        'date',
-        run_date=announcement_time,
-        args=[game_id]
-    )
 
-    # Schedule bother message (2 days before)
-    bother_time = game_time - timedelta(days=2)
-    scheduler.add_job(
-        send_bother_message,
-        'date',
-        run_date=bother_time,
-        args=[game_id]
-    )
-
-    # Schedule pester message (1 day before)
-    pester_time = game_time - timedelta(days=1)
-    scheduler.add_job(
-        send_pester_message,
-        'date',
-        run_date=pester_time,
-        args=[game_id]
-    )
-
-    # Schedule day-of reminder
-    scheduler.add_job(
-        send_day_of_game_reminder_message,
-        'date',
-        run_date=game_time - timedelta(hours=12),
-        args=[game_id]
-    )
 
 # Commands for interfacing with database.
 
@@ -310,13 +313,6 @@ async def bot_get_schedule(ctx):
     except Exception as e:
         await ctx.send(f"Error retrieving schedule: {str(e)}")
         print(f"Error in get_schedule: {e}", flush=True)
-
-# --------------------------------------
-# SET ATTENDANCE
-#
-# Purpose:  Set a player's attendance status for a game.
-# Syntax:   !set_attendance game=123 player=456 status=(yes|no|pending)
-# --------------------------------------
 
 @bot.command(name="set_attendance")
 @is_privileged()
@@ -386,12 +382,6 @@ async def bot_set_attendance_status(ctx, *, args):
         await ctx.send(f"Error setting attendance: {str(e)}")
         print(f"Error in set_attendance: {e}", flush=True)
 
-# --------------------------------------
-# CREATE TEAM
-#
-# Purpose:  Create a new team.
-# Syntax:   !create_team name="Team Name" year=2025 season="Season Name" [home_colour="white"] [away_colour="black"]
-# --------------------------------------
 @bot.command(name="create_team")
 @is_privileged()
 async def bot_create_team(ctx, *, args):
@@ -471,12 +461,6 @@ async def bot_create_team(ctx, *, args):
         print(f"Error in create_team: {e}", flush=True)
         await ctx.send(f"Error creating team: {str(e)}")
 
-# --------------------------------------
-# DELETE TEAM
-#
-# Purpose:  Delete an existing team.
-# Syntax:   !delete_team id=<team_id> CONFIRM="Team Name"
-# --------------------------------------
 @bot.command(name="delete_team")
 @is_privileged()
 async def bot_delete_team(ctx, *, args):
@@ -542,12 +526,6 @@ async def bot_delete_team(ctx, *, args):
         # Log the full error for debugging
         print(f"Error in delete_team: {e}", flush=True)
 
-# --------------------------------------
-# DELETE GAME
-#
-# Purpose:  Delete a game and all associated records.
-# Syntax:   !delete_game id=<game_id> CONFIRM=<date>
-# --------------------------------------
 @bot.command(name="delete_game")
 @is_privileged()
 async def bot_delete_game(ctx, *, args):
@@ -613,12 +591,6 @@ async def bot_delete_game(ctx, *, args):
         # Log the full error for debugging
         print(f"Error in delete_game: {e}", flush=True)
 
-# --------------------------------------
-# TEAM ROSTER
-#
-# Purpose: Show the team roster with players grouped by gender
-# Syntax:  !roster id=<team_id>
-# --------------------------------------
 @bot.command(name="roster")
 async def bot_get_roster(ctx, *, args):
     """Display the roster for a team with players grouped by gender.
@@ -705,12 +677,6 @@ async def bot_get_roster(ctx, *, args):
         # Log the full error for debugging
         print(f"Error in get_roster: {e}", flush=True)
 
-# --------------------------------------
-# GAME ATTENDANCE
-#
-# Purpose: Show the attendance list for a game
-# Syntax:  !attendance game=<game_id>
-# --------------------------------------
 @bot.command(name="attendance")
 async def bot_get_attendance(ctx, *, args):
     """Display the attendance list for a game.
@@ -776,6 +742,9 @@ async def bot_get_attendance(ctx, *, args):
         # Log the full error for debugging
         print(f"Error in get_attendance: {e}", flush=True)
 
+@bot.command(name="create_player")
+@is_privileged()    
+async def bot_create_player(ctx, *, args):
 # --------------------------------------
 # CREATE PLAYER
 #
@@ -786,9 +755,6 @@ async def bot_get_attendance(ctx, *, args):
 #           team        Integer     team_ID         Home team's unique integer ID.
 # --------------------------------------
 # !create_player lastname="lastname" firstname="firstname" gender=(m OR f) (with optional discord_ID="discord_ID")  (returns: player ID)
-@bot.command(name="create_player")
-@is_privileged()
-async def bot_create_player(ctx, *, args):
     """Create a new player. Usage: !create_player lastname="Smith" firstname="John" gender=(m|f) [discord_ID="123456789"]"""
     try:
         if not args:
@@ -809,8 +775,25 @@ async def bot_create_player(ctx, *, args):
         if gender not in ['m', 'f', 'o']:
             raise ValueError("Gender must be 'm', 'f', or 'o'")
 
-        # Optional discord ID
-        username = params.get('discord', '').strip('"')
+        # Handle Discord user identification
+        discord_param = params.get('discord', '').strip('"')
+        discord_user = None
+        
+        if discord_param:
+            try:
+                # First try to parse as ID
+                user_id = int(discord_param)
+                discord_user = await bot.fetch_user(user_id)
+            except ValueError:
+                # If not an ID, try as username
+                # Note: This requires the members intent to be enabled
+                guild = ctx.guild
+                if guild:
+                    discord_user = await guild.fetch_member_named(discord_param)
+            except discord.NotFound:
+                await ctx.send(f"Warning: Could not find Discord user with ID {discord_param}")
+            except Exception as e:
+                await ctx.send(f"Warning: Error looking up Discord user: {str(e)}")
         
         with SessionLocal() as session:
             # Convert gender string to the correct enum value
@@ -819,20 +802,29 @@ async def bot_create_player(ctx, *, args):
             else:  # gender == 'f'
                 gender = Genders.FEMALE_MATCHING.value
 
+            # Create player with both username and ID if found
             player = create_player(
                 session,
                 first_name=firstname,
                 last_name=lastname,
-                discord_username=username if username else None,
+                discord_username=discord_user.name if discord_user else None,
+                discord_id=str(discord_user.id) if discord_user else None,
                 gender=gender
             )
-            await ctx.send(f"Player created successfully! Player ID: {player.id}")
+            
+            if discord_user:
+                await ctx.send(f"Player created successfully! Player ID: {player.id}\nLinked to Discord user: {discord_user.name} (ID: {discord_user.id})")
+            else:
+                await ctx.send(f"Player created successfully! Player ID: {player.id}\nNo Discord user linked")
 
     except Exception as e:
         await ctx.send(f"Error creating player: {str(e)}")
         # Log the full error for debugging
         print(f"Error in create_player: {e}", flush=True)
 
+@bot.command(name="add_player")
+@is_privileged()
+async def bot_add_player(ctx, *, args):
 # --------------------------------------
 # ADD PLAYER TO TEAM
 #
@@ -842,9 +834,6 @@ async def bot_create_player(ctx, *, args):
 #           player      Integer     player_ID       Player's unique integer ID.
 #           team        Integer     team_ID         Home team's unique integer ID.
 # --------------------------------------
-@bot.command(name="add_player")
-@is_privileged()
-async def bot_add_player(ctx, *, args):
     """Add a player to a team. Usage: !add_player player=123 team=456"""
     try:
         params = dict(arg.split('=') for arg in args.split(' ') if '=' in arg)
@@ -870,6 +859,10 @@ async def bot_add_player(ctx, *, args):
 
     except Exception as e:
         await ctx.send(f"Error adding player to team: {str(e)}")
+
+@bot.command(name="create_game")
+@is_privileged()
+async def bot_create_game(ctx, *, args):
 # --------------------------------------
 # CREATE GAME
 #
@@ -883,9 +876,6 @@ async def bot_add_player(ctx, *, args):
 #           park        String      park            Name of the park where the game will be held.
 #           field       Integer     field           Field number at the park.
 # --------------------------------------
-@bot.command(name="create_game")
-@is_privileged()
-async def bot_create_game(ctx, *, args):
     try:
 
         # Parse arguments
@@ -935,29 +925,15 @@ async def bot_create_game(ctx, *, args):
             # After creating the game, schedule a game alert
             team1 = session.query(Team).filter_by(id=away_team_id).first()
             team2 = session.query(Team).filter_by(id=home_team_id).first()
-            print("#### TODO __ FIX THE SCHEDULER.", flush=True)
-            # Schedule the game announcement
-            scheduler.add_job(
-                post_gametime_message,
-                'date',
-                run_date=game_datetime,
-                args=[
-                    team1.name,
-                    team2.name,
-                    'white',
-                    'black',
-                    game_datetime.strftime("%A, %B %d, %I:%M %p"),
-                    park,
-                    field
-                ]
-            )
             
             await ctx.send(f"Game created successfully! Game ID: {game.id}")
 
     except Exception as e:
         await ctx.send(f"Error creating game: {str(e)}")
 
-
+@bot.command(name="edit_player")
+@is_privileged()
+async def bot_edit_player(ctx, *, args):
 # --------------------------------------
 # EDIT PLAYER  
 #
@@ -969,9 +945,6 @@ async def bot_create_game(ctx, *, args):
 #                                       Valid options include "datetime", "park", "field", "team1_id", "team2_id".
 #           String/Int  field_value     New value for the specified field.
 # --------------------------------------
-@bot.command(name="edit_player")
-@is_privileged()
-async def bot_edit_player(ctx, *, args):
     """Edit a player's information. Usage: !edit_player id=123 field_name="new_value" """
     try:
         params = parse_args(args)
@@ -1021,7 +994,9 @@ async def bot_edit_player(ctx, *, args):
     except Exception as e:
         await ctx.send(f"Error updating player: {str(e)}")
 
-
+@bot.command(name="edit_game")
+@is_privileged()
+async def bot_edit_game(ctx, *, args):
 # --------------------------------------
 # EDIT GAME
 #
@@ -1033,9 +1008,6 @@ async def bot_edit_player(ctx, *, args):
 #                                       Valid options include "datetime", "park", "field", "team1_id", "team2_id".
 #           String/Int  field_value     New value for the specified field.
 # --------------------------------------
-@bot.command(name="edit_game")
-@is_privileged()
-async def bot_edit_game(ctx, *, args):
     """Edit a game's information. Usage: !edit_game id=123 field_name="new_value" """
     try:
         params = parse_args(args)
@@ -1069,25 +1041,57 @@ async def bot_edit_game(ctx, *, args):
     except Exception as e:
         await ctx.send(f"Error updating game: {str(e)}")
 
-## --- ON_READY event --- 
+## --- Tasks and Event Handlers --- 
+
+@tasks.loop(hours=1)
+async def check_messages():
+    """Check for upcoming games and send announcements if needed."""
+    try:
+        with SessionLocal() as session:
+            # Get upcoming games in next 3 days
+            now = datetime.utcnow()
+            three_days_from_now = now + timedelta(days=3)
+
+            # Query for games within the next 3 days
+            upcoming_games = session.query(Game).filter(
+                and_(
+                    Game.datetime > now,
+                    Game.datetime <= three_days_from_now,
+                    Game.announcement_msg == None  # Only get games without announcements
+                )
+            ).all()
+
+            # If no upcoming unannounced games, we're done
+            if not upcoming_games:
+                return
+
+            # For each unannounced game, send the announcement
+            for game in upcoming_games:
+                await send_game_announcement(game.id)
+
+    except Exception as e:
+        print(f"Error in check_messages: {e}", flush=True)
+
 
 @bot.event
 async def on_ready():
     print(f"Logged in as {bot.user} (ID: {bot.user.id})")
-    
     # Initialize database
-    init_db(DB_URL, echo=True)
+    config = read_config()
+    init_db(config["database_url"], echo=True)
     print("Database initialized!")
     
-    # Start the scheduler
-    scheduler.start()
-    
+    # Start the message check loop
+    check_messages.start()
+    print("Message check loop started!")
+    BOT_COMMS_CHANNEL_ID = get_comms_channel_id()
+    CHANNEL_ID = get_announcement_channel_id()
     channel = bot.get_channel(BOT_COMMS_CHANNEL_ID) or await bot.fetch_channel(BOT_COMMS_CHANNEL_ID)
     await channel.send("I'm... alive!") 
 
 @bot.event
 async def on_raw_reaction_add(payload):
-    """Handle reaction adds for role assignment."""
+    """Handle reactions."""
     if payload.user_id == bot.user.id:
         return
     
@@ -1095,16 +1099,14 @@ async def on_raw_reaction_add(payload):
         channel = await bot.fetch_channel(payload.channel_id)
         message = await channel.fetch_message(payload.message_id)
         
-        # Check if this is a game announcement message
-        if not message.author.id == bot.user.id or not message.content.startswith("```\n🥏 🥏 GAME ALERT!!"):
-            return
-
-        # Get game ID from message (you'll need to store this in the message)
-        game_id = extract_game_id(message.content)
-        
-        # Get player from discord ID
         with SessionLocal() as session:
-            player = get_player_by_discord(session, str(payload.user_id))
+            # Check if this is a game announcement message
+            game = get_game_from_message(session, message.id)
+            if not game:
+                return        
+
+            # Get player from discord ID
+            player = get_player_by_discord_id(session, str(payload.user_id))
             if not player:
                 return
 
@@ -1120,14 +1122,19 @@ async def on_raw_reaction_add(payload):
             set_attendance_status(session, game_id, player.id, status)
             
         # Update message with new attendance
-        await update_game_message(message, game_id)
+
 
     except Exception as e:
         print(f"Error handling reaction: {e}", flush=True)
 
 if __name__ == "__main__":
     try:
-        bot.run(TOKEN)
+        config = load_config()
+        DISCORD_TOKEN = config.get("discord_token", None)
+        if (DISCORD_TOKEN is None) or (DISCORD_TOKEN == ""):
+            print("Error: Discord token not found in config.json", flush=True)
+            exit(1)
+        bot.run(DISCORD_TOKEN)
     finally:
         scheduler.shutdown()
         dispose_db()

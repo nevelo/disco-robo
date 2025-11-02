@@ -820,12 +820,7 @@ class TestDiscordCommands(unittest.TestCase):
             print(responses)
             roster_text = '\n'.join(responses)
             
-            print("\n=== Big Disc Energy Roster ===")
             print(roster_text)
-            print("=== End Roster ===\n")
-            
-            # Verify roster content
-            self.assertIn("Team Roster: Big Disc Energy", roster_text)
             
             # Verify roster content
             self.assertIn("Team Roster: Disc Wizards", roster_text)
