@@ -29,7 +29,7 @@ def get_game_from_message(session: Session, message_id: str) -> Optional[Game]:
         )
     ).first()
     
-    return game
+    return game.id if game else None
 
 
 ##### TEAM FUNCTIONS #####
@@ -153,7 +153,8 @@ def create_player(
         first_name: Player's first name
         last_name: Player's last name
         gender: 'm' or 'f' (will be converted to Genders enum)
-        discord_username: Optional Discord username
+        discord_username: Optional Discord username (None if not provided)
+        discord_id: Optional Discord ID (None if not provided)
         initial_team_id: Optional ID of team to add player to
     """
     # Convert gender string to enum
@@ -166,8 +167,8 @@ def create_player(
     player = Player(
         real_first=first_name,
         real_last=last_name,
-        discord_username=discord_username or UNKNOWN_DISCORD,
-        discord_id=discord_id or UNKNOWN_DISCORD,
+        discord_username=discord_username,  # Allow NULL if not provided
+        discord_id=discord_id,  # Allow NULL if not provided
         gender=gender_enum
     )
     session.add(player)
@@ -619,3 +620,44 @@ def get_game_data(
         return None
     else:
         raise ValueError("Invalid parameter")
+
+def get_upcoming_games(
+    session: Session,
+    current_time = datetime,
+    future_time = datetime
+):
+    """Get all upcoming games within a certain time delta.
+    
+    Args:
+        session: SQLAlchemy session
+        current_time: Current datetime to compare against
+        delta: Time delta in minutes to look ahead for upcoming games
+        
+    Returns:
+        List of upcoming Game objects
+    """
+    return session.query(Game).filter(Game.datetime >= current_time, Game.datetime <= future_time).all()
+
+def get_game_messages(
+    session: Session,
+    game_id: int
+) -> dict:
+    """Get all Discord message IDs associated with a game.
+    
+    Args:
+        session: SQLAlchemy session
+        game_id: ID of the game
+        
+    Returns:
+        Dict with message types as keys and Discord message IDs as values
+    """
+    game = session.query(Game).filter_by(id=game_id).first()
+    if not game:
+        raise ValueError(f"Game with ID {game_id} not found")
+    
+    return {
+        "announcement_msg": game.announcement_msg,
+        "bother_msg": game.bother_msg,
+        "pester_msg": game.pester_msg,
+        "gameday_msg": game.gameday_msg
+    }

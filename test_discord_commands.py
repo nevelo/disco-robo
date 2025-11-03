@@ -2,11 +2,12 @@ import unittest
 import os
 import asyncio
 from unittest.mock import Mock, patch
+from discord import NotFound
 from datetime import datetime
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from models import Base, Team, Player, Game, Genders, AttendanceStatus, Attendance
-from db_utils import UNKNOWN_DISCORD, get_game_attendance
+from db_utils import get_game_attendance
 
 # Test data for commands
 VALID_COMMANDS = [
@@ -108,6 +109,15 @@ class MockBot:
     def __init__(self):
         self.commands = {}
         self.events = {}
+        self._users = {}  # Dict to store user IDs -> MockMember objects
+
+    async def fetch_user(self, user_id):
+        """Simulate fetching a user by their ID"""
+        # Convert to string since Discord IDs are strings
+        user_id = str(user_id)
+        if user_id in self._users:
+            return self._users[user_id]
+        raise NotFound("User not found")
 
     def command(self, name=None):
         """Simulates the @bot.command() decorator with optional name argument"""
@@ -160,11 +170,27 @@ class MockBot:
         if 'on_ready' in self.events:
             await self.events['on_ready']()
 
+class MockGuild:
+    """Mock Discord guild (server) object"""
+    def __init__(self):
+        self.members = {}  # Dict of username -> MockMember
+
+    async def fetch_member_named(self, username):
+        """Simulate fetching a member by their username"""
+        return self.members.get(username)
+
+class MockMember:
+    """Mock Discord member object"""
+    def __init__(self, id, name):
+        self.id = id
+        self.name = name
+
 class MockContext:
     """Mock Discord context object"""
     def __init__(self):
         self.sent_messages = []
         self.author = Mock(id=12345)
+        self.guild = MockGuild()
 
     async def send(self, message):
         self.sent_messages.append(message)
@@ -194,6 +220,36 @@ class TestDiscordCommands(unittest.TestCase):
         # Create mock context and bot
         self.ctx = MockContext()
         self.bot = MockBot()
+
+        # Set up mock Discord members in the guild
+        test_members = [
+            # First test members
+            ("johna1234", "123456789123456789"),
+            ("sconnor", "223456789123456789"),
+            ("akim", "323456789123456789"),
+            ("mrodriguez", "423456789123456789"),
+            ("echen123", "523456789123456789"),
+            ("staylor", "623456789123456789"),
+            
+            # Winter league members
+            ("mthompson_92", "723456789123456789"),
+            ("ninachen_", "823456789123456789"),
+            ("becca528", "923456789123456789"),
+            ("dparker807", "1023456789123456789"),
+            ("twright054", "1123456789123456789"),
+            ("sophiaa", "1223456789123456789"),
+            ("lc660", "1323456789123456789"),
+            ("emmafisher", "1423456789123456789"),
+            ("ryan_33", "1523456789123456789"),
+            ("isaturner", "1623456789123456789"),
+            ("mhayes", "1723456789123456789"),
+            ("rbennett97", "1823456789123456789")
+        ]
+        
+        for username, user_id in test_members:
+            member = MockMember(id=user_id, name=username)
+            self.ctx.guild.members[username] = member
+            self.bot._users[user_id] = member
 
         # Import disco-robo with our mock bot
         import importlib.util
@@ -244,16 +300,20 @@ class TestDiscordCommands(unittest.TestCase):
                 "sconnor": "Sarah Connor",
                 "akim": "Alex Kim",
                 "mrodriguez": "Maria Rodriguez",
-                UNKNOWN_DISCORD: "James Wilson",
+                None: "James Wilson",
                 "echen123": "Emily Chen",
                 "staylor": "Sam Taylor"
             }
 
             # Verify each player is on the team
             team_players = {p.discord_username: f"{p.real_first} {p.real_last}" for p in cobra_snakes.players}
+            # Define a sort key function that handles None values
+            def sort_key(x):
+                return (x or "")  # Convert None to empty string for sorting
+
             self.assertEqual(set(expected_players.keys()), set(team_players.keys()),
-                           f"Team roster mismatch.\nExpected players: {sorted(expected_players.keys())}\n"
-                           f"Actual players: {sorted(team_players.keys())}")
+                           f"Team roster mismatch.\nExpected players: {sorted(expected_players.keys(), key=sort_key)}\n"
+                           f"Actual players: {sorted(team_players.keys(), key=sort_key)}")
 
             # Verify player details are correct
             for discord_id, full_name in expected_players.items():
@@ -289,7 +349,7 @@ class TestDiscordCommands(unittest.TestCase):
             players = {
                 p.discord_username: p.id 
                 for p in session.query(Player).all() 
-                if p.discord_username != UNKNOWN_DISCORD
+                if p.discord_username != None
             }
 
             # Find the game between Cobra Snakes and Green Geckos
@@ -391,7 +451,7 @@ class TestDiscordCommands(unittest.TestCase):
                     
                     # Convert database state to expected output format
                     def format_player(p):
-                        return f"{p.real_first} {p.real_last} ({p.discord_username})" if p.discord_username != UNKNOWN_DISCORD else f"{p.real_first} {p.real_last}"
+                        return f"{p.real_first} {p.real_last} ({p.discord_username})" if p.discord_username is not None else f"{p.real_first} {p.real_last}"
                     
                     current_attending_names = sorted([format_player(p) for p in attendance["attending"]])
                     current_not_attending_names = sorted([format_player(p) for p in attendance["not_attending"]])
@@ -414,7 +474,7 @@ class TestDiscordCommands(unittest.TestCase):
                     # Convert usernames to full player names for comparison
                     username_to_full_name = {p.discord_username: format_player(p) 
                                            for p in session.query(Player).all() 
-                                           if p.discord_username != UNKNOWN_DISCORD}
+                                           if p.discord_username is not None}
                     
                     expected_attending_names = sorted([username_to_full_name[u] for u in expected_attending_usernames])
                     expected_not_attending_names = sorted([username_to_full_name[u] for u in expected_not_attending_usernames])
@@ -445,7 +505,7 @@ class TestDiscordCommands(unittest.TestCase):
                            f"Not attending players don't match.\nExpected: {expected_not_attending_usernames}\nGot: {actual_not_attending}")
             
             # Verify James Wilson (no discord) is still pending (no record)
-            james = session.query(Player).filter_by(discord_username=UNKNOWN_DISCORD).first()
+            james = session.query(Player).filter_by(discord_username=None).first()
             self.assertIsNotNone(james, "Could not find James Wilson (player with no Discord)")
             self.assertNotIn(james.id, [rec.player_id for rec in game.attendances],
                            "Expected James Wilson to still be pending (no attendance record)")

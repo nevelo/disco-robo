@@ -5,6 +5,7 @@ import shlex
 from datetime import datetime, timedelta
 from typing import List, Optional
 from dotenv import load_dotenv
+import pytz
 from discord.ext import commands, tasks
 from discord import Intents, NotFound
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -19,7 +20,7 @@ from db_utils import (
     create_team, edit_team, delete_team, get_team_data,
     create_player, edit_player, delete_player, get_player_data,
     create_game, edit_game, delete_game, get_game_data,
-    get_game_from_message, get_player_by_discord_id,
+    get_game_from_message, get_player_by_discord_id, get_upcoming_games, get_game_messages,
     set_attendance_status,
     get_team_games,
     get_team_roster,
@@ -221,21 +222,19 @@ React with {EMOJI_THUMBS_UP} or {EMOJI_THUMBS_DOWN} to update your status!
     msg = await channel.send(msg_content)
 
     # Add reactions for attendance tracking
-    for emoji in YES_EMOJI_LIST:
-        await msg.add_reaction(emoji)
-    for emoji in NO_EMOJI_LIST:
-        await msg.add_reaction(emoji)
+    await msg.add_reaction(EMOJI_THUMBS_UP)
+    await msg.add_reaction(EMOJI_THUMBS_DOWN)
     return msg
 
 
 async def send_bother_message(game_id: int):
     """Send message to bother pending players"""
     with SessionLocal() as session:
-        game = session.query(Game).filter_by(id=game_id).first()
+        game = session.query(Game).filter_by(id=game_id).first() ## UNFUCK THIS
         attendance = get_game_attendance(session, game_id)
         
         # Get discord IDs for pending players
-        pending_players = [p for p in attendance["pending"] if p.discord_username != UNKNOWN_DISCORD]
+        pending_players = [p for p in attendance["pending"] if p.discord_username is not None]
         if not pending_players:
             return
 
@@ -488,7 +487,7 @@ async def bot_delete_team(ctx, *, args):
 
         with SessionLocal() as session:
             # Find the team first
-            team = session.query(Team).filter(Team.id == team_id).first()
+            team = session.query(Team).filter(Team.id == team_id).first() # UNFUCK THIS
             if not team:
                 raise ValueError(f"No team found with ID {team_id}")
             
@@ -636,7 +635,7 @@ async def bot_get_roster(ctx, *, args):
 
             # Calculate maximum lengths for formatting
             max_name_length = max([len(f"{p.real_first} {p.real_last}") for p in players], default=0)
-            max_discord_length = max([len(p.discord_username) for p in players], default=0)
+            max_discord_length = max([len(p.discord_username or "") for p in players], default=0)
             col_width = max(max_name_length + max_discord_length + 3, 30)  # +3 for parentheses and space
             
             # Build the roster display
@@ -655,13 +654,13 @@ async def bot_get_roster(ctx, *, args):
                 f_text = ""
                 if f_player:
                     f_text = f"{f_player.real_first} {f_player.real_last}"
-                    if f_player.discord_username != UNKNOWN_DISCORD:
+                    if f_player.discord_username:  # None and empty string both evaluate to False
                         f_text += f" ({f_player.discord_username})"
                 
                 o_text = ""
                 if o_player:
                     o_text = f"{o_player.real_first} {o_player.real_last}"
-                    if o_player.discord_username != UNKNOWN_DISCORD:
+                    if o_player.discord_username:  # None and empty string both evaluate to False
                         o_text += f" ({o_player.discord_username})"
                 
                 lines.append(f"| {f_text.ljust(col_width)} | {o_text.ljust(col_width)} |")
@@ -725,10 +724,10 @@ async def bot_get_attendance(ctx, *, args):
                 lines.append(title + ":")
                 if players:
                     for player in players:
-                        if player.discord_username != UNKNOWN_DISCORD:
-                            lines.append(f"  • {player.real_first} {player.real_last} ({player.discord_username})")
-                        else:
-                            lines.append(f"  • {player.real_first} {player.real_last}")
+                        line = f"  • {player.real_first} {player.real_last}"
+                        if player.discord_username:  # None and empty string both evaluate to False
+                            line += f" ({player.discord_username})"
+                        lines.append(line)
                 else:
                     lines.append("  (none)")
                 lines.append("")
@@ -790,7 +789,7 @@ async def bot_create_player(ctx, *, args):
                 guild = ctx.guild
                 if guild:
                     discord_user = await guild.fetch_member_named(discord_param)
-            except discord.NotFound:
+            except NotFound:
                 await ctx.send(f"Warning: Could not find Discord user with ID {discord_param}")
             except Exception as e:
                 await ctx.send(f"Warning: Error looking up Discord user: {str(e)}")
@@ -1048,26 +1047,50 @@ async def check_messages():
     """Check for upcoming games and send announcements if needed."""
     try:
         with SessionLocal() as session:
-            # Get upcoming games in next 3 days
-            now = datetime.utcnow()
-            three_days_from_now = now + timedelta(days=3)
+            tz = pytz.timezone(TIMEZONE)
+            now = datetime.now(tz)
+            
+            # Check for today's games that haven't started yet but are after 8 AM
+            earliest_notification = now.replace(hour=8, minute=0, second=0, microsecond=0)
+            if now >= earliest_notification:
+                # It's after 8 AM today, look for games that haven't started yet
+                today_games = get_upcoming_games(session, now, now + timedelta(hours=16))  # Look ahead 16 hours to cover rest of day
+                if today_games:
+                    for game in today_games:
+                        msgs = get_game_messages(session, game)
+                        if not msgs['gameday_msg']:
+                            await send_day_of_game_reminder_message(game)
+                            await asyncio.sleep(1)  # Rate limit
 
-            # Query for games within the next 3 days
-            upcoming_games = session.query(Game).filter(
-                and_(
-                    Game.datetime > now,
-                    Game.datetime <= three_days_from_now,
-                    Game.announcement_msg == None  # Only get games without announcements
-                )
-            ).all()
+            # Check for upcoming games in next 3 days
+            three_days_future = now + timedelta(days=3)
+            upcoming_games = get_upcoming_games(session, now, three_days_future)
+            if upcoming_games:
+                for game in upcoming_games:
+                    msgs = get_game_messages(session, game)
+                    if not msgs['announcement_msg']:
+                        await send_game_announcement(game)
+                        await asyncio.sleep(1)  # Rate limit
 
-            # If no upcoming unannounced games, we're done
-            if not upcoming_games:
-                return
+            # Check for games in 2 days that need bother messages
+            two_days_future = now + timedelta(days=2)
+            bother_games = get_upcoming_games(session, now, two_days_future)
+            if bother_games:
+                for game in bother_games:
+                    msgs = get_game_messages(session, game)
+                    if not msgs['bother_msg']:
+                        await send_bother_message(game)
+                        await asyncio.sleep(1)  # Rate limit
 
-            # For each unannounced game, send the announcement
-            for game in upcoming_games:
-                await send_game_announcement(game.id)
+            # Check for games tomorrow that need pester messages
+            tomorrow = now + timedelta(days=1)
+            pester_games = get_upcoming_games(session, now, tomorrow)
+            if pester_games:
+                for game in pester_games:
+                    msgs = get_game_messages(session, game)
+                    if not msgs['pester_msg']:
+                        await send_pester_message(game)
+                        await asyncio.sleep(1)  # Rate limit
 
     except Exception as e:
         print(f"Error in check_messages: {e}", flush=True)
@@ -1101,9 +1124,9 @@ async def on_raw_reaction_add(payload):
         
         with SessionLocal() as session:
             # Check if this is a game announcement message
-            game = get_game_from_message(session, message.id)
-            if not game:
-                return        
+            game_id = get_game_from_message(session, message.id)
+            if not game_id:
+                return
 
             # Get player from discord ID
             player = get_player_by_discord_id(session, str(payload.user_id))

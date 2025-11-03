@@ -7,7 +7,7 @@ from models import Base, Team, Player, Game, Attendance, AttendanceStatus, Gende
 from db_utils import (
     create_team, create_player, create_game, get_team_roster, 
     add_player_to_team, get_player, remove_player_from_team, delete_game,
-    get_team_games, set_attendance_status, get_game_attendance, get_player_by_discord
+    get_team_games, set_attendance_status, get_game_attendance, get_player_by_discord_id
 )
 
 class TestDatabase(unittest.TestCase):
@@ -82,14 +82,20 @@ class TestDatabase(unittest.TestCase):
             away_colour="orange"
         )
 
-        # Create six players
+        # Create six players with mock Discord IDs and usernames
         self.players = [
-            create_player(self.session, "Alice", "Johnson", "f", "alice#1234"),
-            create_player(self.session, "Bob", "Smith", "m", "bob#5678"),
-            create_player(self.session, "Carol", "Davis", "f", "carol#9012"),
-            create_player(self.session, "David", "Wilson", "m", "david#3456"),
-            create_player(self.session, "Eve", "Brown", "f", "eve#7890"),
-            create_player(self.session, "Frank", "Miller", "m", "frank#1234")
+            create_player(self.session, "Alice", "Johnson", "f", 
+                        discord_username="alicejohnson", discord_id="123456789123456789"),
+            create_player(self.session, "Bob", "Smith", "m", 
+                        discord_username="bobsmith", discord_id="223456789123456789"),
+            create_player(self.session, "Carol", "Davis", "f", 
+                        discord_username="caroldavis", discord_id="323456789123456789"),
+            create_player(self.session, "David", "Wilson", "m", 
+                        discord_username="davidwilson", discord_id="423456789123456789"),
+            create_player(self.session, "Eve", "Brown", "f", 
+                        discord_username="evebrown", discord_id="523456789123456789"),
+            create_player(self.session, "Frank", "Miller", "m", 
+                        discord_username="frankmiller", discord_id="623456789123456789")
         ]
         
         # Add players to Cosmic Rays team
@@ -218,7 +224,7 @@ class TestDatabase(unittest.TestCase):
         self.assertIsNotNone(retrieved_player)
         self.assertEqual(retrieved_player.real_first, "Alice")
         self.assertEqual(retrieved_player.real_last, "Johnson")
-        self.assertEqual(retrieved_player.discord_username, "alice#1234")
+        self.assertEqual(retrieved_player.discord_username, "alicejohnson")
         
         # Try getting a non-existent player
         nonexistent_player = get_player(self.session, 9999)
@@ -325,34 +331,34 @@ class TestDatabase(unittest.TestCase):
         
         # Two players set ATTENDING
         print("\nStep 1: Alice and Bob set to ATTENDING")
-        alice = get_player_by_discord(self.session, "alice#1234")
+        alice = get_player_by_discord_id(self.session, "123456789123456789")
         set_attendance_status(self.session, game.id, alice.id, AttendanceStatus.ATTENDING)
-        bob = get_player_by_discord(self.session, "bob#5678")
+        bob = get_player_by_discord_id(self.session, "223456789123456789")
         set_attendance_status(self.session, game.id, bob.id, AttendanceStatus.ATTENDING)
         self.display_attendance_summary(game)
         
         # One player set NOT ATTENDING
         print("\nStep 2: Carol sets to NOT ATTENDING")
-        carol = get_player_by_discord(self.session, "carol#9012")
+        carol = get_player_by_discord_id(self.session, "323456789123456789")
         set_attendance_status(self.session, game.id, carol.id, AttendanceStatus.NOT_ATTENDING)
         self.display_attendance_summary(game)
         
         # One more player set ATTENDING
         print("\nStep 3: David sets to ATTENDING")
-        david = get_player_by_discord(self.session, "david#3456")
+        david = get_player_by_discord_id(self.session, "423456789123456789")
         set_attendance_status(self.session, game.id, david.id, AttendanceStatus.ATTENDING)
         self.display_attendance_summary(game)
 
         # Frank leaves the team
         print("\nStep 3.5: Frank leaves the team")
-        frank = get_player_by_discord(self.session, "frank#1234")
+        frank = get_player_by_discord_id(self.session, "623456789123456789")
         # Use the new utility function to remove Frank from the team
         remove_player_from_team(self.session, self.cosmic_rays.id, frank)
         self.display_attendance_summary(game)
         
         # One more player set NOT ATTENDING
         print("\nStep 4: Eve sets to NOT ATTENDING")
-        eve = get_player_by_discord(self.session, "eve#7890")
+        eve = get_player_by_discord_id(self.session, "523456789123456789")
         set_attendance_status(self.session, game.id, eve.id, AttendanceStatus.NOT_ATTENDING)
         self.display_attendance_summary(game)
 
@@ -363,7 +369,8 @@ class TestDatabase(unittest.TestCase):
             "George",
             "Wallis",
             "m",
-            "george#4567"
+            discord_username="georgewallis",
+            discord_id="723456789123456789"
         )
         add_player_to_team(self.session, self.cosmic_rays.id, george)
         

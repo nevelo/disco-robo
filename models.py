@@ -63,12 +63,20 @@ class Player(Base):
     __tablename__ = "players"
 
     id = Column(Integer, primary_key=True)  
-    discord_username = Column(String, nullable=False)
+    discord_username = Column(String, nullable=True)
     real_first = Column(String, nullable=False)
     real_last = Column(String, nullable=False)
     gender = Column(Enum(Genders), nullable=False)
     shortname = Column(String, nullable=True)  # Optional nickname
-    discord_id = Column(String, nullable=False, unique=True)  # Discord user ID
+    discord_id = Column(String, nullable=True)  # Discord user ID
+    
+    # Add unique constraints that allow NULL values
+    __table_args__ = (
+        UniqueConstraint('discord_username', name='uq_player_discord_username',
+                        sqlite_on_conflict='IGNORE'),  # Allows multiple NULLs
+        UniqueConstraint('discord_id', name='uq_player_discord_id',
+                        sqlite_on_conflict='IGNORE'),  # Allows multiple NULLs
+    )
 
     # Many-to-many: Player <-> Teams through player_team_association
     teams = relationship(
