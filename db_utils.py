@@ -86,10 +86,13 @@ def edit_team(
 # Delete a team and all its relationships.
 def delete_team(
     session: Session,
-    team: Team
+    team_id: int
 ) -> None:  
     """Delete a team and all its relationships."""
     # Delete all games associated with this team
+    team = session.query(Team).filter_by(id=team_id).first()
+    if not team:
+        raise ValueError(f"Team with ID {team_id} not found")
     for game in team.games_as_away + team.games_as_home:
         session.delete(game)
     
@@ -431,24 +434,58 @@ def delete_game(
 
     return game
 
-# Get the full roster of a team.
-def get_team_roster(
+def get_player_object(
+    session: Session,
+    player_id: int
+) -> Optional[Player]:
+    """
+    Get a player object by their ID.
+    Returns None if player not found.
+    """
+    return session.query(Player).filter_by(id=player_id).first()
+
+def get_team_roster_obj(
     session: Session,
     team_id: int,
     include_unknown: bool = True
 ) -> List[Player]:
     """
-    Get all players on a team.
-    If include_unknown is False, excludes players with placeholder Discord usernames.
+    Get the full roster of a team.
+    """
+    team = session.query(Team).filter_by(id=team_id).first()
+    if not team:
+        return []
+
+    if include_unknown:
+        return team.players
+    else:
+        return [p for p in team.players if p.discord_username != UNKNOWN_DISCORD]
+
+# Get the full roster of a team.
+def get_team_roster(
+    session: Session,
+    team_id: int,
+    include_unknown: bool = True
+) -> List[int]:
+    """
+    Get all player IDs on a team.
+    
+    Args:
+        session: SQLAlchemy session
+        team_id: ID of the team
+        include_unknown: If False, excludes players with placeholder Discord usernames
+        
+    Returns:
+        List of player IDs on the team
     """
     team = session.query(Team).filter_by(id=team_id).first()
     if not team:
         return []
     
     if include_unknown:
-        return team.players
+        return [p.id for p in team.players]
     else:
-        return [p for p in team.players if p.discord_username != UNKNOWN_DISCORD]
+        return [p.id for p in team.players if p.discord_username != UNKNOWN_DISCORD]
 
 def get_player(
     session: Session,
@@ -469,6 +506,16 @@ def get_player_by_discord_id(
     Returns None if player not found.
     """
     return session.query(Player).filter_by(discord_id=discord_id).first()
+
+def get_game_object(
+    session: Session,
+    game_id: int
+) -> Optional[Game]:
+    """
+    Get a game object by its ID.
+    Returns None if game not found.
+    """
+    return session.query(Game).filter_by(id=game_id).first()
 
 def get_game_attendance(
     session: Session,
@@ -631,12 +678,13 @@ def get_upcoming_games(
     Args:
         session: SQLAlchemy session
         current_time: Current datetime to compare against
-        delta: Time delta in minutes to look ahead for upcoming games
+        future_time: Future datetime to look up to
         
     Returns:
-        List of upcoming Game objects
+        List of upcoming game IDs
     """
-    return session.query(Game).filter(Game.datetime >= current_time, Game.datetime <= future_time).all()
+    games = session.query(Game).filter(Game.datetime >= current_time, Game.datetime <= future_time).all()
+    return [game.id for game in games]
 
 def get_game_messages(
     session: Session,

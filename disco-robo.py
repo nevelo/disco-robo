@@ -12,14 +12,15 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 from sqlalchemy.orm import Session
 from sqlalchemy import and_
+from bot_logger import BotLogger, log_command, log_event, log_task
 from models import (
     SessionLocal, Player, Game, Team,
     init_db, dispose_db, Genders, AttendanceStatus
 )
 from db_utils import (
     create_team, edit_team, delete_team, get_team_data,
-    create_player, edit_player, delete_player, get_player_data,
-    create_game, edit_game, delete_game, get_game_data,
+    create_player, edit_player, delete_player, get_player_data, get_player_object,
+    create_game, edit_game, delete_game, get_game_data, get_game_object,
     get_game_from_message, get_player_by_discord_id, get_upcoming_games, get_game_messages,
     set_attendance_status,
     get_team_games,
@@ -66,6 +67,7 @@ def load_config() -> dict:
 
 def read_config() -> dict:
     config = load_config()
+    global DISCORD_TOKEN, DATABASE_URL, LOGFILE, TRACKED_TEAMS, PRIVILEGED_USERS, TIMEZONE, CHANNELS
     DISCORD_TOKEN = config.get("discord_token", DISCORD_TOKEN)
     DATABASE_URL = config.get("database_url", DATABASE_URL)
     LOGFILE = config.get("logfile", LOGFILE)
@@ -126,8 +128,7 @@ intents.message_content = True
 bot = commands.Bot(command_prefix="!", intents=intents) 
 
 # Scheduler
-scheduler = AsyncIOScheduler(timezone="America/Toronto")  # adjust timezone 
-## TODO: Load time zone from config file
+scheduler = AsyncIOScheduler(timezone=TIMEZONE)
 
 # Defined emojis
 EMOJI_DISC           = "\U0001F94F"
@@ -138,11 +139,41 @@ EMOJI_MAP            = "\U0001F4CD"
 EMOJI_GREEN_CHECK    = "\u2705"
 EMOJI_RED_X          = "\u274C"
 EMOJI_HOURGLASS      = "\u23F3"
+EMOJI_BELL           = "\U0001F514"
+EMOJI_WARNING        = "\u26A0\uFE0F"
+EMOJI_SIREN          = "\U0001F6A8"
 
 CONFUSED_EMOJI       = "\u2049\uFE0F"
 
-YES_EMOJI_LIST = {EMOJI_DISC, EMOJI_THUMBS_UP} ## TODO: Add skin tone variations
-NO_EMOJI_LIST = {EMOJI_THUMBS_DOWN} ## TODO: Add skin tone variations
+# Skin tone modifiers
+SKIN_TONE_LIGHT         = "\U0001F3FB"
+SKIN_TONE_MEDIUM_LIGHT  = "\U0001F3FC"
+SKIN_TONE_MEDIUM        = "\U0001F3FD"
+SKIN_TONE_MEDIUM_DARK   = "\U0001F3FE"
+SKIN_TONE_DARK          = "\U0001F3FF"
+
+# Create all thumbs up variations
+THUMBS_UP_VARIATIONS = {
+    EMOJI_THUMBS_UP,  # Default yellow
+    EMOJI_THUMBS_UP + SKIN_TONE_LIGHT,
+    EMOJI_THUMBS_UP + SKIN_TONE_MEDIUM_LIGHT,
+    EMOJI_THUMBS_UP + SKIN_TONE_MEDIUM,
+    EMOJI_THUMBS_UP + SKIN_TONE_MEDIUM_DARK,
+    EMOJI_THUMBS_UP + SKIN_TONE_DARK
+}
+
+# Create all thumbs down variations
+THUMBS_DOWN_VARIATIONS = {
+    EMOJI_THUMBS_DOWN,  # Default yellow
+    EMOJI_THUMBS_DOWN + SKIN_TONE_LIGHT,
+    EMOJI_THUMBS_DOWN + SKIN_TONE_MEDIUM_LIGHT,
+    EMOJI_THUMBS_DOWN + SKIN_TONE_MEDIUM,
+    EMOJI_THUMBS_DOWN + SKIN_TONE_MEDIUM_DARK,
+    EMOJI_THUMBS_DOWN + SKIN_TONE_DARK
+}
+
+YES_EMOJI_LIST = {EMOJI_DISC} | THUMBS_UP_VARIATIONS | {EMOJI_GREEN_CHECK}
+NO_EMOJI_LIST = THUMBS_DOWN_VARIATIONS | {EMOJI_RED_X}
 
 # Team colours per the emoji standard (i.e. what circles are available).
 circles = {
@@ -164,7 +195,7 @@ async def send_game_announcement(game_id: int):
         if (home_id == None):
             raise ValueError(f"Game {game_id} has no hometeam_id")
         away_id = get_game_data(session, game_id, "awayteam_id")
-        gametime = get_game_data(session, game_id, "gametime")
+        gametime = get_game_data(session, game_id, "gametime") # FIX:: Game time is stored as a DateTime not a string
         park = get_game_data(session, game_id, "park")
         field = get_game_data(session, game_id, "field")
         hometeam = get_team_data(session, home_id, "name")
@@ -172,7 +203,7 @@ async def send_game_announcement(game_id: int):
         away_colour = get_team_data(session, away_id, "away_colour")
         home_colour = get_team_data(session, home_id, "home_colour")    
 
-    await send_game_announcement(
+    await _send_game_announcement(
         game_id=game_id,
         awayteam=awayteam,
         hometeam=hometeam,
@@ -183,7 +214,7 @@ async def send_game_announcement(game_id: int):
         field=field
     )
 
-async def send_game_announcement(
+async def _send_game_announcement(
     game_id: int,
     awayteam: str,
     hometeam: str,
@@ -230,7 +261,7 @@ React with {EMOJI_THUMBS_UP} or {EMOJI_THUMBS_DOWN} to update your status!
 async def send_bother_message(game_id: int):
     """Send message to bother pending players"""
     with SessionLocal() as session:
-        game = session.query(Game).filter_by(id=game_id).first() ## UNFUCK THIS
+        game = get_game_object(session, game_id)
         attendance = get_game_attendance(session, game_id)
         
         # Get discord IDs for pending players
@@ -239,29 +270,100 @@ async def send_bother_message(game_id: int):
             return
 
         mentions = " ".join(f"<@{p.discord_username}>" for p in pending_players)
-        channel = bot.get_channel(CHANNEL_ID)
+        channel = bot.get_channel(CHANNELS["announcements"]) or await bot.fetch_channel(CHANNELS["announcements"])
         
-        await channel.send(
-            f"🔔 Hey {mentions}! Still waiting on your response for the game in 2 days!\n"
-            f"({game.awayteam.name} @ {game.hometeam.name}, "
-            f"{game.datetime.strftime('%A at %I:%M %p')})"
-        )
+        msg_content = f"""```
+{EMOJI_BELL} ATTENDANCE REMINDER {EMOJI_BELL}
+
+Hey {mentions}!
+Still waiting on your response for:
+
+{game.awayteam.name} @ {game.hometeam.name}
+{game.datetime.strftime('%A at %I:%M %p')}
+{game.park}, Field {game.field}
+
+React with {EMOJI_THUMBS_UP} or {EMOJI_THUMBS_DOWN} to update your status!
+```"""
+        msg = await channel.send(msg_content)
+        await msg.add_reaction(EMOJI_THUMBS_UP)
+    await msg.add_reaction(EMOJI_THUMBS_DOWN)
+    return msg
 
 async def send_pester_message(game_id: int):
     """Send final warning to pending players"""
-    # Similar to bother_message but with more urgent tone
-    return
+    with SessionLocal() as session:
+        game = get_game_object(session, game_id)
+        attendance = get_game_attendance(session, game_id)
+        
+        # Get discord IDs for pending players
+        pending_players = [p for p in attendance["pending"] if p.discord_username is not None]
+        if not pending_players:
+            return
+
+        mentions = " ".join(f"<@{p.discord_username}>" for p in pending_players)
+        channel = bot.get_channel(CHANNELS["announcements"]) or await bot.fetch_channel(CHANNELS["announcements"])
+        
+        msg_content = f"""```
+{EMOJI_WARNING} URGENT ATTENDANCE CHECK {EMOJI_WARNING}
+
+Hey {mentions}!
+Do we need to find a sub??? Game is TOMORROW:
+
+{game.awayteam.name} @ {game.hometeam.name}
+{game.datetime.strftime('%A at %I:%M %p')}
+{game.park}, Field {game.field}
+
+Please react with {EMOJI_THUMBS_UP} or {EMOJI_THUMBS_DOWN} ASAP!
+```"""
+        await channel.send(msg_content)
 
 async def send_day_of_game_reminder_message(game_id: int):
-    """Send day-of game reminder"""
-    # Send reminder to all attending players
-    return
+    """Send day-of game reminder with current attendance status"""
+    with SessionLocal() as session:
+        game = get_game_object(session, game_id)
+        if not game:
+            raise ValueError(f"No game found with ID {game_id}")
+        
+        attendance = get_game_attendance(session, game_id)
+        attending = [f"{p.real_first} {p.real_last}" for p in attendance["attending"]]
+        not_attending = [f"{p.real_first} {p.real_last}" for p in attendance["not_attending"]]
+        pending = [f"{p.real_first} {p.real_last}" for p in attendance["pending"]]
+
+        # Get team colors
+        away_colour = game.awayteam.away_colour
+        home_colour = game.hometeam.home_colour
+        team_colour_emoji = circles.get(away_colour, CONFUSED_EMOJI)
+        opp_colour_emoji = circles.get(home_colour, CONFUSED_EMOJI)
+
+        channel = bot.get_channel(CHANNELS["announcements"]) or await bot.fetch_channel(CHANNELS["announcements"])
+        
+        msg_content = f"""```
+{EMOJI_SIREN} {EMOJI_DISC} GAME TODAY!! {EMOJI_DISC} {EMOJI_SIREN}
+    
+{team_colour_emoji} {game.awayteam.name} vs {opp_colour_emoji} {game.hometeam.name}
+
+{EMOJI_CLOCK} {game.datetime.strftime('%I:%M %p')} TODAY!
+{EMOJI_MAP} {game.park}, Field {game.field}
+
+Current Lineup:
+{EMOJI_GREEN_CHECK} {attending}
+{EMOJI_RED_X} {not_attending}
+{EMOJI_HOURGLASS} {pending}
+
+Last chance to update your status!
+React with {EMOJI_THUMBS_UP} or {EMOJI_THUMBS_DOWN}
+```"""
+        msg = await channel.send(msg_content)
+        await msg.add_reaction(EMOJI_THUMBS_UP)
+        await msg.add_reaction(EMOJI_THUMBS_DOWN)
+        return msg
 
 
 
 # Commands for interfacing with database.
 
 @bot.command(name="schedule")
+@log_command()
 async def bot_get_schedule(ctx):
     """Display the schedule for tracked teams.
     Usage: !schedule
@@ -293,7 +395,7 @@ async def bot_get_schedule(ctx):
                     opponent = game.awayteam if is_home else game.hometeam
                     home_away = "vs" if is_home else "@"
 
-                    # Format the game info
+                    # Format the game info  #TODO: Format as table, one line per game
                     weekday = game.datetime.strftime("%A")
                     month = game.datetime.strftime("%B")
                     day = str(game.datetime.day)  # This will not have leading zeros
@@ -314,6 +416,7 @@ async def bot_get_schedule(ctx):
         print(f"Error in get_schedule: {e}", flush=True)
 
 @bot.command(name="set_attendance")
+@log_command()
 @is_privileged()
 async def bot_set_attendance_status(ctx, *, args):
     """Set a player's attendance status for a game.
@@ -382,6 +485,7 @@ async def bot_set_attendance_status(ctx, *, args):
         print(f"Error in set_attendance: {e}", flush=True)
 
 @bot.command(name="create_team")
+@log_command()
 @is_privileged()
 async def bot_create_team(ctx, *, args):
     """Create a new team. 
@@ -461,6 +565,7 @@ async def bot_create_team(ctx, *, args):
         await ctx.send(f"Error creating team: {str(e)}")
 
 @bot.command(name="delete_team")
+@log_command()
 @is_privileged()
 async def bot_delete_team(ctx, *, args):
     """Delete a team and all its associated records.
@@ -487,19 +592,19 @@ async def bot_delete_team(ctx, *, args):
 
         with SessionLocal() as session:
             # Find the team first
-            team = session.query(Team).filter(Team.id == team_id).first() # UNFUCK THIS
-            if not team:
+            team_name = get_team_data(session, team_id, param='name')
+            if not team_name:
                 raise ValueError(f"No team found with ID {team_id}")
             
             # Store team info for confirmation message
-            team_name = team.name
-            team_season = f"{team.season} {team.year}"
+            team_season = get_team_data(session, team_id, param='season')
+            team_year = get_team_data(session, team_id, param='year')
 
             # Check for confirmation
             confirmation = params.get('CONFIRM', '').strip('"')
             if not confirmation:
                 await ctx.send(
-                    f'You are trying to delete TEAM "{team_name}"\n'
+                    f'You are trying to delete TEAM "{team_name} {team_season} {team_year}"\n'
                     f'If you really mean to do this, use the following syntax:\n'
                     f'!delete_team id={team_id} CONFIRM="{team_name}"'
                 )
@@ -510,7 +615,7 @@ async def bot_delete_team(ctx, *, args):
                 raise ValueError(f'Confirmation "{confirmation}" does not match team name "{team_name}"')
             
             # Delete the team
-            delete_team(session=session, team=team)
+            delete_team(session=session, team_id=team_id)
             
             await ctx.send(
                 f"Team deleted successfully!\n"
@@ -526,6 +631,7 @@ async def bot_delete_team(ctx, *, args):
         print(f"Error in delete_team: {e}", flush=True)
 
 @bot.command(name="delete_game")
+@log_command()
 @is_privileged()
 async def bot_delete_game(ctx, *, args):
     """Delete a game and all associated records.
@@ -552,7 +658,7 @@ async def bot_delete_game(ctx, *, args):
 
         with SessionLocal() as session:
             # Find the game first
-            game = session.query(Game).filter(Game.id == game_id).first()
+            game = get_game_object(session, game_id)
             if not game:
                 raise ValueError(f"No game found with ID {game_id}")
             
@@ -591,6 +697,7 @@ async def bot_delete_game(ctx, *, args):
         print(f"Error in delete_game: {e}", flush=True)
 
 @bot.command(name="roster")
+@log_command()
 async def bot_get_roster(ctx, *, args):
     """Display the roster for a team with players grouped by gender.
     Usage: !roster id=<team_id>
@@ -612,14 +719,14 @@ async def bot_get_roster(ctx, *, args):
             raise ValueError("Team ID must be a valid number")
 
         with SessionLocal() as session:
-            # Get the team to verify it exists and get its name
-            team = session.query(Team).filter(Team.id == team_id).first()
-            if not team:
+            team_name = get_team_data(session, team_id, param='name')
+            if not team_name:
                 raise ValueError(f"No team found with ID {team_id}")
 
             # Get the roster
-            players = get_team_roster(session, team_id, include_unknown=True)
-            
+            _player_ids = get_team_roster(session, team_id, include_unknown=True)
+            players = [get_player_object(session, player_id) for player_id in _player_ids]
+            players = [p for p in players if p is not None]  # Filter out any None values
             # Split players by gender
             female_matching = []
             open_matching = []
@@ -640,7 +747,7 @@ async def bot_get_roster(ctx, *, args):
             
             # Build the roster display
             lines = []
-            lines.append(f"Team Roster: {team.name}")
+            lines.append(f"Team Roster: {team_name}")
             lines.append("|" + "-" * (col_width * 2 + 5) + "|")  # 5 for margins and separator
             lines.append(f"| {'FEMALE MATCHING'.ljust(col_width)} | {'OPEN MATCHING'.ljust(col_width)} |")
             lines.append("|" + "-" * (col_width * 2 + 5) + "|")
@@ -672,11 +779,17 @@ async def bot_get_roster(ctx, *, args):
     except ValueError as ve:
         await ctx.send(f"Error: {str(ve)}")
     except Exception as e:
-        await ctx.send(f"An unexpected error occurred: {str(e)}")
+        import traceback
+        error_info = traceback.extract_tb(e.__traceback__)[-1]
+        line_no = error_info.lineno
+        filename = error_info.filename
+        await ctx.send(f"An unexpected error occurred: {str(e)}\nLocation: {filename}, line {line_no}")
         # Log the full error for debugging
-        print(f"Error in get_roster: {e}", flush=True)
+        print(f"Error in get_roster: {e}\nFull traceback:", flush=True)
+        traceback.print_exc()
 
 @bot.command(name="attendance")
+@log_command()
 async def bot_get_attendance(ctx, *, args):
     """Display the attendance list for a game.
     Usage: !attendance game=<game_id>
@@ -698,7 +811,7 @@ async def bot_get_attendance(ctx, *, args):
 
         with SessionLocal() as session:
             # Get the game to verify it exists and get teams
-            game = session.query(Game).filter(Game.id == game_id).first()
+            game = get_game_object(session, game_id)
             if not game:
                 raise ValueError(f"No game found with ID {game_id}")
             
@@ -742,6 +855,7 @@ async def bot_get_attendance(ctx, *, args):
         print(f"Error in get_attendance: {e}", flush=True)
 
 @bot.command(name="create_player")
+@log_command()
 @is_privileged()    
 async def bot_create_player(ctx, *, args):
 # --------------------------------------
@@ -822,6 +936,7 @@ async def bot_create_player(ctx, *, args):
         print(f"Error in create_player: {e}", flush=True)
 
 @bot.command(name="add_player")
+@log_command()
 @is_privileged()
 async def bot_add_player(ctx, *, args):
 # --------------------------------------
@@ -843,23 +958,24 @@ async def bot_add_player(ctx, *, args):
             raise ValueError("Missing required parameters")
 
         with SessionLocal() as session:
-            player = session.query(Player).filter_by(id=player_id).first()
+            player = get_player_object(session, player_id)
             if not player:
                 raise ValueError(f"Player {player_id} not found")
 
             # Verify the team exists
-            team = session.query(Team).filter_by(id=team_id).first()
-            if not team:
+            team_name = get_team_data(session, team_id, param='name')
+            if not team_name:
                 raise ValueError(f"Team {team_id} not found")
             
             # Use add_player_to_team to properly set up the relationship
             add_player_to_team(session, team_id, player)
-            await ctx.send(f"Player {player_id} ({player.real_first} {player.real_last}) added to team {team_id} ({team.name})")
+            await ctx.send(f"Player {player_id} ({player.real_first} {player.real_last}) added to team {team_id} ({team_name})")
 
     except Exception as e:
         await ctx.send(f"Error adding player to team: {str(e)}")
 
 @bot.command(name="create_game")
+@log_command()
 @is_privileged()
 async def bot_create_game(ctx, *, args):
 # --------------------------------------
@@ -921,16 +1037,14 @@ async def bot_create_game(ctx, *, args):
                 park=park,
                 field=field
             )
-            # After creating the game, schedule a game alert
-            team1 = session.query(Team).filter_by(id=away_team_id).first()
-            team2 = session.query(Team).filter_by(id=home_team_id).first()
-            
+
             await ctx.send(f"Game created successfully! Game ID: {game.id}")
 
     except Exception as e:
         await ctx.send(f"Error creating game: {str(e)}")
 
 @bot.command(name="edit_player")
+@log_command()
 @is_privileged()
 async def bot_edit_player(ctx, *, args):
 # --------------------------------------
@@ -956,7 +1070,7 @@ async def bot_edit_player(ctx, *, args):
         del params['id']
 
         with SessionLocal() as session:
-            player = session.query(Player).filter_by(id=player_id).first()
+            player = get_player_object(session, player_id)
             if not player:
                 raise ValueError(f"Player {player_id} not found")
 
@@ -994,6 +1108,7 @@ async def bot_edit_player(ctx, *, args):
         await ctx.send(f"Error updating player: {str(e)}")
 
 @bot.command(name="edit_game")
+@log_command()
 @is_privileged()
 async def bot_edit_game(ctx, *, args):
 # --------------------------------------
@@ -1019,7 +1134,7 @@ async def bot_edit_game(ctx, *, args):
         del params['id']
 
         with SessionLocal() as session:
-            game = session.query(Game).filter_by(id=game_id).first()
+            game = get_game_object(session, game_id)
             if not game:
                 raise ValueError(f"Game {game_id} not found")
 
@@ -1043,6 +1158,7 @@ async def bot_edit_game(ctx, *, args):
 ## --- Tasks and Event Handlers --- 
 
 @tasks.loop(hours=1)
+@log_task("check_messages")
 async def check_messages():
     """Check for upcoming games and send announcements if needed."""
     try:
@@ -1097,6 +1213,7 @@ async def check_messages():
 
 
 @bot.event
+@log_event("bot_ready")
 async def on_ready():
     print(f"Logged in as {bot.user} (ID: {bot.user.id})")
     # Initialize database
@@ -1107,12 +1224,13 @@ async def on_ready():
     # Start the message check loop
     check_messages.start()
     print("Message check loop started!")
-    BOT_COMMS_CHANNEL_ID = get_comms_channel_id()
-    CHANNEL_ID = get_announcement_channel_id()
-    channel = bot.get_channel(BOT_COMMS_CHANNEL_ID) or await bot.fetch_channel(BOT_COMMS_CHANNEL_ID)
+    bot_channel = get_comms_channel_id()
+    team_channel = get_announcement_channel_id()
+    channel = bot.get_channel(bot_channel) or await bot.fetch_channel(bot_channel)
     await channel.send("I'm... alive!") 
 
 @bot.event
+@log_event("reaction_add")
 async def on_raw_reaction_add(payload):
     """Handle reactions."""
     if payload.user_id == bot.user.id:

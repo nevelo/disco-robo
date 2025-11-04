@@ -5,7 +5,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, joinedload
 from models import Base, Team, Player, Game, Attendance, AttendanceStatus, Genders
 from db_utils import (
-    create_team, create_player, create_game, get_team_roster, 
+    create_team, create_player, create_game, get_team_roster, get_team_roster_obj,
     add_player_to_team, get_player, remove_player_from_team, delete_game,
     get_team_games, set_attendance_status, get_game_attendance, get_player_by_discord_id
 )
@@ -201,8 +201,9 @@ class TestDatabase(unittest.TestCase):
     def test_player_team_relationships(self):
         """Test verifying player-team relationships."""
         # Verify Cosmic Rays roster
-        roster = get_team_roster(self.session, self.cosmic_rays.id)
+        roster = get_team_roster_obj(self.session, self.cosmic_rays.id)
         
+
         # Verify counts and membership
         self.assertEqual(len(roster), 6, "Should have 6 players on the team")
         roster_names = {f"{p.real_first} {p.real_last}" for p in roster}

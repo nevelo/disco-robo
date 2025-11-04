@@ -411,7 +411,7 @@ class TestDiscordCommands(unittest.TestCase):
                 
             else:
                 # This is an attendance check - verify the output format and content
-                messages = await self.execute_command(command, verbose=False)
+                messages = await self.execute_command(command, verbose=True)
                 
                 # There should be exactly one message with the attendance info
                 self.assertEqual(len(messages), 1, "Expected exactly one response message")
@@ -448,7 +448,12 @@ class TestDiscordCommands(unittest.TestCase):
                 with self.Session() as session:
                     game = session.query(Game).filter(Game.datetime == datetime(2025, 11, 30, 19, 30)).first()
                     attendance = get_game_attendance(session, game.id, include_details=False)
-                    
+                    print("##########################")
+                    print("##########################")
+                    print(attendance, flush=True)
+                    print("##########################")
+                    print("##########################")
+
                     # Convert database state to expected output format
                     def format_player(p):
                         return f"{p.real_first} {p.real_last} ({p.discord_username})" if p.discord_username is not None else f"{p.real_first} {p.real_last}"
@@ -724,7 +729,7 @@ class TestDiscordCommands(unittest.TestCase):
             delete_command = '!delete_team id=2'  # Delete Python Pirates 
             responses = await self.execute_command(delete_command)
             confirmation_text = '\n'.join(responses)
-            self.assertIn('You are trying to delete TEAM "Python Pirates"', confirmation_text)
+            self.assertIn('You are trying to delete TEAM "Python Pirates Fall 2025"', confirmation_text)
             self.assertIn('!delete_team id=2 CONFIRM="Python Pirates"', confirmation_text)
             
             # Verify team still exists in schedule
@@ -854,6 +859,8 @@ class TestDiscordCommands(unittest.TestCase):
             # Edit the player's name
             edit_command = '!edit_player id=1 first="John" last="Rom"'
             responses = await self.execute_command(edit_command)
+            print("FARTS", flush=True)
+            print(responses, flush=True)
             self.assertTrue(any("Player 1 updated successfully" in msg for msg in responses))
 
             # Verify player's updated name
