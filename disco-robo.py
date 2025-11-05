@@ -23,7 +23,7 @@ from db_utils import (
     create_player, edit_player, delete_player, get_player_data, get_player_object,
     create_game, edit_game, delete_game, get_game_data, get_game_object,
     get_game_from_message, get_player_by_discord_id, get_upcoming_games, get_game_messages,
-    set_attendance_status,
+    set_attendance_status, set_game_message,
     get_team_games,
     get_team_roster,
     get_game_attendance,
@@ -332,7 +332,10 @@ Do we need to find a sub??? Game is TOMORROW:
 
 Please react with {EMOJI_THUMBS_UP} or {EMOJI_THUMBS_DOWN} ASAP!
 ```"""
-        await channel.send(msg_content)
+        msg = await channel.send(msg_content)
+        await msg.add_reaction(EMOJI_THUMBS_UP)
+        await msg.add_reaction(EMOJI_THUMBS_DOWN)
+        return msg
 
 async def send_day_of_game_reminder_message(game_id: int):
     """Send day-of game reminder with current attendance status"""
@@ -1243,7 +1246,8 @@ async def check_messages():
                     for game in today_games:
                         msgs = get_game_messages(session, game)
                         if not msgs['gameday_msg']:
-                            await send_day_of_game_reminder_message(game)
+                            msg = await send_day_of_game_reminder_message(game)
+                            set_game_message(session, game.id, 'gameday_msg', msg.id)
                             await asyncio.sleep(1)  # Rate limit
 
             # Check for upcoming games in next 3 days
@@ -1253,7 +1257,8 @@ async def check_messages():
                 for game in upcoming_games:
                     msgs = get_game_messages(session, game)
                     if not msgs['announcement_msg']:
-                        await send_game_announcement(game)
+                        msg = await send_game_announcement(game)
+                        set_game_message(session, game.id, 'announcement_msg', msg.id)
                         await asyncio.sleep(1)  # Rate limit
 
             # Check for games in 2 days that need bother messages
@@ -1263,7 +1268,8 @@ async def check_messages():
                 for game in bother_games:
                     msgs = get_game_messages(session, game)
                     if not msgs['bother_msg']:
-                        await send_bother_message(game)
+                        msg = await send_bother_message(game)
+                        set_game_message(session, game.id, 'bother_msg', msg.id)
                         await asyncio.sleep(1)  # Rate limit
 
             # Check for games tomorrow that need pester messages
@@ -1273,7 +1279,8 @@ async def check_messages():
                 for game in pester_games:
                     msgs = get_game_messages(session, game)
                     if not msgs['pester_msg']:
-                        await send_pester_message(game)
+                        msg = await send_pester_message(game)
+                        set_game_message(session, game.id, 'pester_msg', msg.id)
                         await asyncio.sleep(1)  # Rate limit
 
     except Exception as e:
@@ -1306,6 +1313,7 @@ async def on_ready():
     
     # Start the scheduler
     scheduler.start()
+    print("Scheduler started!")
 
     # Start the message check loop
     check_messages.start()

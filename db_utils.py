@@ -709,3 +709,28 @@ def get_game_messages(
         "pester_msg": game.pester_msg,
         "gameday_msg": game.gameday_msg
     }
+
+def set_game_message(
+    session: Session,
+    game_id: int,
+    message_type: str,
+    message_id: str
+) -> None:
+    """Set a Discord message ID for a specific message type in a game.
+    
+    Args:
+        session: SQLAlchemy session
+        game_id: ID of the game
+        message_type: Type of message ('announcement_msg', 'bother_msg', 'pester_msg', 'gameday_msg')
+        message_id: Discord message ID to set
+    """
+    game = session.query(Game).filter_by(id=game_id).first()
+    if not game:
+        raise ValueError(f"Game with ID {game_id} not found")
+    
+    if message_type not in ["announcement_msg", "bother_msg", "pester_msg", "gameday_msg"]:
+        raise ValueError("Invalid message type")
+    
+    setattr(game, message_type, message_id)
+    session.commit(
+)
