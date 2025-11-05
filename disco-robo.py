@@ -411,7 +411,7 @@ async def bot_get_schedule(ctx):
             max_team1_width = max([len(f"{g.awayteam.name}") + 1 for g in upcoming_games])  # +1 for emoji
             max_team2_width = max([len(f"{g.hometeam.name}") + 1 for g in upcoming_games])  # +1 for emoji
             vs_padding = 4  # Space around "vs"
-            teams_width = max_team1_width + max_team2_width + vs_padding + 2  # +2 for spacing
+            teams_width = max_team1_width + max_team2_width + vs_padding + 8  # +2 for spacing
             
             park_width = max([
                 len(f"{g.park} {g.field}") 
@@ -420,7 +420,7 @@ async def bot_get_schedule(ctx):
             park_width = max(park_width, 10)  # Minimum width
 
             # Total width including borders and spacing
-            total_width = date_width + time_width + teams_width + park_width + 13
+            total_width = date_width + time_width + teams_width + park_width + 16
 
             # Build the table
             lines = []
@@ -429,7 +429,7 @@ async def bot_get_schedule(ctx):
             lines.append(border)
             lines.append(
                 f"| {'DATE':^{date_width}} | {'TIME':^{time_width}} "
-                f"| {'TEAMS':^{teams_width}} | {'LOCATION':^{park_width}} |"
+                f"| {'TEAMS':^{teams_width + 3}} | {'LOCATION':^{park_width}} |"
             )
             lines.append(border)
 
@@ -437,13 +437,13 @@ async def bot_get_schedule(ctx):
                 date_str = game.datetime.strftime("%b-%d")
                 time_str = game.datetime.strftime("%-I:%M %p")
                 
-                away_color = circles.get(game.awayteam.away_colour.lower(), "⚪")
-                home_color = circles.get(game.hometeam.home_colour.lower(), "⚪")
+                away_color = circles.get(game.awayteam.away_colour.lower(), CONFUSED_EMOJI)
+                home_color = circles.get(game.hometeam.home_colour.lower(), CONFUSED_EMOJI)
                 
                 # Format teams with consistent spacing
                 team1 = f"{away_color}{game.awayteam.name}"
                 team2 = f"{home_color}{game.hometeam.name}"
-                teams_str = f"{team1:<{max_team1_width}} vs {team2:<{max_team2_width}}"
+                teams_str = f"{team1:<{max_team1_width}}   vs  {team2:<{max_team2_width}}"
                 
                 park_str = f"{game.park} {game.field}"
                 
