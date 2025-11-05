@@ -118,7 +118,9 @@ def is_privileged():
     async def predicate(ctx):
         config = load_config()
         privileged_users = config.get("privileged_users", [])
-        is_admin = ctx.author.id in privileged_users
+        # Convert any string IDs to integers
+        privileged_ids = [int(uid) if isinstance(uid, str) else uid for uid in privileged_users]
+        is_admin = ctx.author.id in privileged_ids
         if not is_admin:
             await ctx.send(f"❌ Sorry, you don't have permission to use this command. Your ID ({ctx.author.id}) needs to be added to the privileged users list.")
         return is_admin
@@ -1121,6 +1123,57 @@ async def bot_edit_player(ctx, *, args):
 
     except Exception as e:
         await ctx.send(f"Error updating player: {str(e)}")
+
+@bot.command(name="track")
+@log_command()
+@is_privileged()
+async def bot_track_team(ctx, team_id: int):
+    """Add a team to the bot's tracked teams list.
+    Usage: !track <team_id>
+    
+    Adds the specified team to the list of teams that the bot tracks for announcements
+    and attendance. Changes are saved to config.json and take effect immediately.
+    """
+    try:
+        # Verify the team exists first
+        with SessionLocal() as session:
+            team_name = get_team_data(session, team_id, param='name')
+            if not team_name:
+                raise ValueError(f"No team found with ID {team_id}")
+            
+            team_season = get_team_data(session, team_id, param='season')
+            team_year = get_team_data(session, team_id, param='year')
+        
+        # Load current config
+        config = load_config()
+        tracked_teams = config.get("tracked_teams", [])
+        
+        # Check if team is already tracked
+        if team_id in tracked_teams:
+            await ctx.send(f"ℹ️ Team {team_id} ({team_name}) is already being tracked.")
+            return
+        
+        # Add to tracked teams
+        tracked_teams.append(team_id)
+        config["tracked_teams"] = tracked_teams
+        
+        # Save back to config file
+        os.makedirs('config', exist_ok=True)
+        with open('config/config.json', 'w') as f:
+            json.dump(config, f, indent=4)
+        
+        # Update global variable
+        global TRACKED_TEAMS
+        TRACKED_TEAMS = tracked_teams
+        
+        await ctx.send(f"✅ Now tracking team {team_id}: {team_name} ({team_season} {team_year})")
+        
+    except ValueError as ve:
+        await ctx.send(f"Error: {str(ve)}")
+    except Exception as e:
+        await ctx.send(f"An unexpected error occurred: {str(e)}")
+        print(f"Error in track_team: {e}", flush=True)
+
 
 @bot.command(name="edit_game")
 @log_command()
