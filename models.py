@@ -169,6 +169,10 @@ def init_db(db_url: str = "sqlite:///disc_bot.db", echo: bool = True):
     # Create all tables
     Base.metadata.create_all(engine)
     print("Database tables created successfully", flush=True)
+    if SessionLocal is None:
+        print("SessionLocal is still None after initialization!", flush=True)
+        raise Exception("SessionLocal is not initialized properly.")
+    return SessionLocal
 
 def dispose_db():
     """

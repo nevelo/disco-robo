@@ -1372,6 +1372,7 @@ def verify_db_connection():
     """Verify database connection is working by making a test query."""
     global SessionLocal
     if SessionLocal is None:
+        print("SessionLocal is not initialized", flush=True)
         return False
     try:
         # Try to create a session and make a simple query
@@ -1385,7 +1386,6 @@ def verify_db_connection():
         return False
 
 if __name__ == "__main__":
-    global SessionLocal
     try:
         config = load_config()
         DISCORD_TOKEN = config.get("discord_token", None)
