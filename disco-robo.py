@@ -118,7 +118,10 @@ def is_privileged():
     async def predicate(ctx):
         config = load_config()
         privileged_users = config.get("privileged_users", [])
-        return ctx.author.id in privileged_users
+        is_admin = ctx.author.id in privileged_users
+        if not is_admin:
+            await ctx.send(f"❌ Sorry, you don't have permission to use this command. Your ID ({ctx.author.id}) needs to be added to the privileged users list.")
+        return is_admin
     return commands.check(predicate)
 
 def parse_args(args_str):
@@ -1223,6 +1226,21 @@ async def check_messages():
     except Exception as e:
         print(f"Error in check_messages: {e}", flush=True)
 
+
+@bot.event
+async def on_command_error(ctx, error):
+    """Handle command errors globally"""
+    if isinstance(error, commands.CheckFailure):
+        # We already send a custom message in is_privileged(), so just return
+        return
+    elif isinstance(error, commands.MissingRequiredArgument):
+        await ctx.send(f"Error: Missing required argument: {error.param}")
+    elif isinstance(error, commands.BadArgument):
+        await ctx.send(f"Error: Bad argument: {str(error)}")
+    else:
+        # Log unexpected errors
+        print(f"Unexpected error: {error}", flush=True)
+        await ctx.send(f"An unexpected error occurred: {str(error)}")
 
 @bot.event
 @log_event("bot_ready")
