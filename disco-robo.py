@@ -407,12 +407,11 @@ async def bot_get_schedule(ctx):
             date_width = 8  # Fixed width for "MMM-DD"
             time_width = 8  # Fixed width for "H:MM PM"
             
-            # Calculate max team name lengths including emojis
-            teams_width = max([
-                len(f"{g.awayteam.name} vs {g.hometeam.name}") + 4  # +4 for team circles
-                for g in upcoming_games
-            ])
-            teams_width = max(teams_width, 20)  # Minimum width
+            # Calculate team name widths
+            max_team1_width = max([len(f"{g.awayteam.name}") + 1 for g in upcoming_games])  # +1 for emoji
+            max_team2_width = max([len(f"{g.hometeam.name}") + 1 for g in upcoming_games])  # +1 for emoji
+            vs_padding = 4  # Space around "vs"
+            teams_width = max_team1_width + max_team2_width + vs_padding + 2  # +2 for spacing
             
             park_width = max([
                 len(f"{g.park} {g.field}") 
@@ -426,12 +425,13 @@ async def bot_get_schedule(ctx):
             # Build the table
             lines = []
             lines.append("Game Schedule")
-            lines.append("+" + "-" * (total_width - 2) + "+")
+            border = "+" + "-" * (total_width - 2) + "+"
+            lines.append(border)
             lines.append(
                 f"| {'DATE':^{date_width}} | {'TIME':^{time_width}} "
-                f"| {'TEAMS':^{teams_width}} | {'PARK':^{park_width}} |"
+                f"| {'TEAMS':^{teams_width}} | {'LOCATION':^{park_width}} |"
             )
-            lines.append("+" + "-" * (total_width - 2) + "+")
+            lines.append(border)
 
             for game in upcoming_games:
                 date_str = game.datetime.strftime("%b-%d")
@@ -440,8 +440,10 @@ async def bot_get_schedule(ctx):
                 away_color = circles.get(game.awayteam.away_colour.lower(), "⚪")
                 home_color = circles.get(game.hometeam.home_colour.lower(), "⚪")
                 
-                # Format teams with consistent spacing around 'vs'
-                teams_str = f"{away_color}{game.awayteam.name} vs {home_color}{game.hometeam.name}"
+                # Format teams with consistent spacing
+                team1 = f"{away_color}{game.awayteam.name}"
+                team2 = f"{home_color}{game.hometeam.name}"
+                teams_str = f"{team1:<{max_team1_width}} vs {team2:<{max_team2_width}}"
                 
                 park_str = f"{game.park} {game.field}"
                 
@@ -450,7 +452,7 @@ async def bot_get_schedule(ctx):
                     f"| {teams_str:<{teams_width}} | {park_str:<{park_width}} |"
                 )
             
-            lines.append("+" + "-" * (total_width - 2) + "+")
+            lines.append(border)
             
             await ctx.send("```\n" + "\n".join(lines) + "\n```")
 
