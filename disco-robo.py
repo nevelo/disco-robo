@@ -1232,18 +1232,20 @@ async def bot_edit_game(ctx, *, args):
 @log_task("check_messages")
 async def check_messages():
     """Check for upcoming games and send announcements if needed."""
-    print(1)
+    # Check if database is initialized
+    if SessionLocal is None:
+        print("Database not yet initialized, skipping check_messages")
+        return
+        
     try:
         with SessionLocal() as session:
             tz = pytz.timezone(TIMEZONE)
             now = datetime.now(tz)
-            print(2)
             # Check for today's games that haven't started yet but are after 8 AM
             earliest_notification = now.replace(hour=8, minute=0, second=0, microsecond=0)
             if now >= earliest_notification:
                 # It's after 8 AM today, look for games that haven't started yet
                 today_games = get_upcoming_games(session, now, now + timedelta(hours=16))  # Look ahead 16 hours to cover rest of day
-                print(3)
                 if today_games:
                     for game in today_games:
                         msgs = get_game_messages(session, game)
@@ -1254,19 +1256,16 @@ async def check_messages():
 
             # Check for upcoming games in next 3 days
             three_days_future = now + timedelta(days=3)
-            print(4)
             upcoming_games = get_upcoming_games(session, now, three_days_future)
             if upcoming_games:
                 for game in upcoming_games:
                     msgs = get_game_messages(session, game)
-                    print(5)
                     if not msgs['announcement_msg']:
                         msg = await send_game_announcement(game)
                         set_game_message(session, game.id, 'announcement_msg', msg.id)
                         await asyncio.sleep(1)  # Rate limit
 
             # Check for games in 2 days that need bother messages
-            print(6)
             two_days_future = now + timedelta(days=2)
             bother_games = get_upcoming_games(session, now, two_days_future)
             if bother_games:
@@ -1278,7 +1277,6 @@ async def check_messages():
                         await asyncio.sleep(1)  # Rate limit
 
             # Check for games tomorrow that need pester messages
-            print(7)
             tomorrow = now + timedelta(days=1)
             pester_games = get_upcoming_games(session, now, tomorrow)
             if pester_games:
