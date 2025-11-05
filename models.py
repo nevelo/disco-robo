@@ -155,14 +155,20 @@ def init_db(db_url: str = "sqlite:///disc_bot.db", echo: bool = True):
     """
     global engine, SessionLocal
     
+    print(f"Creating engine with URL: {db_url}", flush=True)
     # Create engine with the given URL
     engine = create_engine(db_url, echo=echo)
+    print("Engine created successfully", flush=True)
     
+    print("Creating session factory", flush=True)
     # Create session factory
     SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+    print("Session factory created successfully", flush=True)
     
+    print("Creating database tables", flush=True)
     # Create all tables
     Base.metadata.create_all(engine)
+    print("Database tables created successfully", flush=True)
 
 def dispose_db():
     """

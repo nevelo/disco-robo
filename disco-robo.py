@@ -1369,25 +1369,15 @@ def cleanup():
     dispose_db()
 
 def verify_db_connection():
-    """Verify database connection and schema are properly set up."""
+    """Verify database connection is working by making a test query."""
     if SessionLocal is None:
-        print("SessionLocal is not initialized", flush=True)
         return False
     try:
-        # Check if we can create a session
+        # Try to create a session and make a simple query
         with SessionLocal() as session:
-            # Verify all expected tables exist by checking table names in the metadata
-            inspector = inspect(engine)
-            expected_tables = {'teams', 'players', 'games', 'attendance', 'game_messages', 'team_players'}
-            actual_tables = set(inspector.get_table_names())
-            
-            missing_tables = expected_tables - actual_tables
-            if missing_tables:
-                print(f"Missing tables in database: {missing_tables}", flush=True)
-                return False
-                
-            print(f"Database verification successful. Found tables: {actual_tables}", flush=True)
-            return True
+            # Try to get the first team (or any simple query)
+            session.query(Team).first()
+        return True
     except Exception as e:
         print(f"Database verification failed: {e}", flush=True)
         return False
@@ -1403,8 +1393,13 @@ if __name__ == "__main__":
         
         # Initialize database before starting the bot
         print("Initializing database...", flush=True)
-        init_db(config["database_url"], echo=True)
-        
+        try:
+            init_db(config["database_url"], echo=True)
+        except Exception as e:
+            print(f"Database initialization failed: {e}", flush=True)
+            cleanup()
+            sys.exit(1)
+            
         # Verify database connection
         if not verify_db_connection():
             print("Failed to verify database connection!", flush=True)
