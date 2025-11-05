@@ -1,4 +1,5 @@
 import os
+import sys
 import asyncio
 import json
 import shlex
@@ -1268,14 +1269,26 @@ async def on_raw_reaction_add(payload):
     except Exception as e:
         print(f"Error handling reaction: {e}", flush=True)
 
+async def shutdown():
+    """Properly shutdown the bot and cleanup resources"""
+    if scheduler.running:
+        scheduler.shutdown()
+    dispose_db()
+    await bot.close()
+
 if __name__ == "__main__":
     try:
         config = load_config()
         DISCORD_TOKEN = config.get("discord_token", None)
         if (DISCORD_TOKEN is None) or (DISCORD_TOKEN == ""):
             print("Error: Discord token not found in config.json", flush=True)
-            exit(1)
+            asyncio.run(shutdown())
+            sys.exit(1)
         bot.run(DISCORD_TOKEN)
+    except Exception as e:
+        print(f"Error running bot: {e}", flush=True)
+        asyncio.run(shutdown())
+        sys.exit(1)
     finally:
-        scheduler.shutdown()
-        dispose_db()
+        if not asyncio.get_event_loop().is_closed():
+            asyncio.run(shutdown())
