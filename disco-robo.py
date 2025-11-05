@@ -393,9 +393,11 @@ async def bot_get_schedule(ctx):
 
         with SessionLocal() as session:
             now = datetime.now()
-            future = now + timedelta(days=30)
-            upcoming_games = get_upcoming_games(session, now, future)
-            
+            future = now + timedelta(days=365)
+            game_ids = get_upcoming_games(session, now, future)
+            upcoming_games = [get_game_object(session, game_id) for game_id in game_ids]
+            upcoming_games = [g for g in upcoming_games if g is not None and (g.hometeam_id in tracked_teams or g.awayteam_id in tracked_teams)]
+
             if not upcoming_games:
                 await ctx.send("No upcoming games scheduled.")
                 return
@@ -932,15 +934,12 @@ async def bot_create_player(ctx, *, args):
             try:
                 # If it's a member of the current guild
                 if ctx.guild:
-                    # Search through guild members
-                    members = await ctx.guild.fetch_members().flatten()
-                    discord_user = next(
-                        (m for m in members if 
-                         m.name == discord_param or 
-                         str(m.id) == discord_param or
-                         m.display_name == discord_param),
-                        None
-                    )
+                    async for member in ctx.guild.fetch_members():
+                        if (member.name == discord_param or 
+                            str(member.id) == discord_param or
+                            member.display_name == discord_param):
+                            discord_user = member
+                            break
                 
                 # If not found in guild, try direct user fetch by ID
                 if not discord_user and discord_param.isdigit():
