@@ -46,10 +46,10 @@ CHANNELS = {
 def load_config() -> dict:
     try:
         with open('config/config.json', 'r') as f:
-            return json.load(f)
+            config = json.load(f)
     except FileNotFoundError:
         print("Warning: config.json not found. Creating default config file.")
-        default_config = {
+        config = {
             "discord_token": None,
             "database_url": "db/disco_robo.db",
             "logfile": "logs/disco_robo.log",
@@ -63,8 +63,19 @@ def load_config() -> dict:
         }
         os.makedirs('config', exist_ok=True)
         with open('config/config.json', 'w') as f:
-            json.dump(default_config, f, indent=4)
-        return default_config
+            json.dump(config, f, indent=4)
+    
+    # Ensure database URL is properly formatted for SQLAlchemy
+    db_path = config["database_url"]
+    if not db_path.startswith(("sqlite://", "mysql://", "postgresql://")):
+        # Convert relative path to absolute path
+        abs_path = os.path.abspath(db_path)
+        # Ensure directory exists
+        os.makedirs(os.path.dirname(abs_path), exist_ok=True)
+        # Format as SQLite URL
+        config["database_url"] = f"sqlite:///{abs_path}"
+    
+    return config
 
 def read_config() -> dict:
     config = load_config()
@@ -1269,12 +1280,11 @@ async def on_raw_reaction_add(payload):
     except Exception as e:
         print(f"Error handling reaction: {e}", flush=True)
 
-async def shutdown():
-    """Properly shutdown the bot and cleanup resources"""
+def cleanup():
+    """Non-async cleanup for resources"""
     if scheduler.running:
         scheduler.shutdown()
     dispose_db()
-    await bot.close()
 
 if __name__ == "__main__":
     try:
@@ -1282,13 +1292,12 @@ if __name__ == "__main__":
         DISCORD_TOKEN = config.get("discord_token", None)
         if (DISCORD_TOKEN is None) or (DISCORD_TOKEN == ""):
             print("Error: Discord token not found in config.json", flush=True)
-            asyncio.run(shutdown())
+            cleanup()
             sys.exit(1)
         bot.run(DISCORD_TOKEN)
     except Exception as e:
         print(f"Error running bot: {e}", flush=True)
-        asyncio.run(shutdown())
+        cleanup()
         sys.exit(1)
     finally:
-        if not asyncio.get_event_loop().is_closed():
-            asyncio.run(shutdown())
+        cleanup()
