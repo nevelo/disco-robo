@@ -669,6 +669,72 @@ async def bot_delete_team(ctx, *, args):
         # Log the full error for debugging
         print(f"Error in delete_team: {e}", flush=True)
 
+@bot.command(name="delete_player")
+@log_command()
+@is_privileged()
+async def bot_delete_player(ctx, *, args):
+    """Delete a player and all their associated records.
+    Usage: !delete_player id=<player_id> CONFIRM="<firstname> <lastname>"
+    
+    Arguments:
+    - id: Player ID (required)
+    - CONFIRM: Player's full name for confirmation (required, must match exactly)
+    
+    Note: This will also delete all attendance records associated with the player.
+    """
+    try:
+        if not args:
+            await ctx.send("Error: Missing arguments. Usage: !delete_player id=<player_id> CONFIRM=\"<firstname> <lastname>\"")
+            return
+        
+        params = parse_args(args)
+        try:
+            player_id = int(params.get('id', 0))
+            if player_id <= 0:
+                raise ValueError("Player ID must be a positive number")
+        except ValueError:
+            raise ValueError("Player ID must be a valid number")
+
+        with SessionLocal() as session:
+            # Find the player first
+            player = get_player_object(session, player_id)
+            if not player:
+                raise ValueError(f"No player found with ID {player_id}")
+            
+            # Store player info for confirmation message
+            player_name = f"{player.real_first} {player.real_last}"
+            player_discord = player.discord_username or "No Discord"
+
+            # Check for confirmation
+            confirmation = params.get('CONFIRM', '').strip('"')
+            if not confirmation:
+                await ctx.send(
+                    f'You are trying to delete PLAYER "{player_name}" (Discord: {player_discord})\n'
+                    f'If you really mean to do this, use the following syntax:\n'
+                    f'!delete_player id={player_id} CONFIRM="{player_name}"'
+                )
+                return
+
+            # Validate confirmation matches player name
+            if confirmation != player_name:
+                raise ValueError(f'Confirmation "{confirmation}" does not match player name "{player_name}"')
+            
+            # Delete the player
+            delete_player(session=session, player_id=player_id)
+            
+            await ctx.send(
+                f"Player deleted successfully!\n"
+                f"Name: {player_name}\n"
+                f"Discord: {player_discord}"
+            )
+
+    except ValueError as ve:
+        await ctx.send(f"Error: {str(ve)}")
+    except Exception as e:
+        await ctx.send(f"An unexpected error occurred: {str(e)}")
+        # Log the full error for debugging
+        print(f"Error in delete_player: {e}", flush=True)
+
 @bot.command(name="delete_game")
 @log_command()
 @is_privileged()
