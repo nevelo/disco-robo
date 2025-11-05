@@ -669,6 +669,65 @@ async def bot_delete_team(ctx, *, args):
         # Log the full error for debugging
         print(f"Error in delete_team: {e}", flush=True)
 
+@bot.command(name="remove_player_from_team")
+@log_command()
+@is_privileged()
+async def bot_remove_player_from_team(ctx, *, args):
+    """Remove a player from a team.
+    Usage: !remove_player_from_team player=123 team=456
+    
+    Arguments:
+    - player: Player ID (required)
+    - team: Team ID (required)
+    """
+    try:
+        if not args:
+            await ctx.send("Error: Missing arguments. Usage: !remove_player_from_team player=123 team=456")
+            return
+
+        params = parse_args(args)
+        
+        try:
+            player_id = int(params.get('player', 0))
+            team_id = int(params.get('team', 0))
+            if player_id <= 0:
+                raise ValueError("Player ID must be a positive number")
+            if team_id <= 0:
+                raise ValueError("Team ID must be a positive number")
+        except ValueError:
+            raise ValueError("Player ID and Team ID must be valid numbers")
+
+        with SessionLocal() as session:
+            # Verify player exists
+            player = get_player_object(session, player_id)
+            if not player:
+                raise ValueError(f"No player found with ID {player_id}")
+
+            # Verify team exists
+            team_name = get_team_data(session, team_id, param='name')
+            if not team_name:
+                raise ValueError(f"No team found with ID {team_id}")
+
+            # Check if player is on team
+            if team_id not in [team.id for team in player.teams]:
+                raise ValueError(f"Player {player.real_first} {player.real_last} is not on team {team_name}")
+
+            # Remove player from team
+            player.teams = [team for team in player.teams if team.id != team_id]
+            session.commit()
+
+            await ctx.send(
+                f"✅ Player removed successfully!\n"
+                f"Player: {player.real_first} {player.real_last}\n"
+                f"Removed from team: {team_name}"
+            )
+
+    except ValueError as ve:
+        await ctx.send(f"Error: {str(ve)}")
+    except Exception as e:
+        await ctx.send(f"An unexpected error occurred: {str(e)}")
+        print(f"Error in remove_player_from_team: {e}", flush=True)
+
 @bot.command(name="delete_player")
 @log_command()
 @is_privileged()
