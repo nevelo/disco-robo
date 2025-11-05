@@ -1310,10 +1310,6 @@ async def on_command_error(ctx, error):
 @log_event("bot_ready")
 async def on_ready():
     print(f"Logged in as {bot.user} (ID: {bot.user.id})")
-    # Initialize database
-    config = read_config()
-    init_db(config["database_url"], echo=True)
-    print("Database initialized!")
     
     # Start the scheduler
     scheduler.start()
@@ -1372,6 +1368,30 @@ def cleanup():
         scheduler.shutdown()
     dispose_db()
 
+def verify_db_connection():
+    """Verify database connection and schema are properly set up."""
+    if SessionLocal is None:
+        print("SessionLocal is not initialized", flush=True)
+        return False
+    try:
+        # Check if we can create a session
+        with SessionLocal() as session:
+            # Verify all expected tables exist by checking table names in the metadata
+            inspector = inspect(engine)
+            expected_tables = {'teams', 'players', 'games', 'attendance', 'game_messages', 'team_players'}
+            actual_tables = set(inspector.get_table_names())
+            
+            missing_tables = expected_tables - actual_tables
+            if missing_tables:
+                print(f"Missing tables in database: {missing_tables}", flush=True)
+                return False
+                
+            print(f"Database verification successful. Found tables: {actual_tables}", flush=True)
+            return True
+    except Exception as e:
+        print(f"Database verification failed: {e}", flush=True)
+        return False
+
 if __name__ == "__main__":
     try:
         config = load_config()
@@ -1380,6 +1400,19 @@ if __name__ == "__main__":
             print("Error: Discord token not found in config.json", flush=True)
             cleanup()
             sys.exit(1)
+        
+        # Initialize database before starting the bot
+        print("Initializing database...", flush=True)
+        init_db(config["database_url"], echo=True)
+        
+        # Verify database connection
+        if not verify_db_connection():
+            print("Failed to verify database connection!", flush=True)
+            cleanup()
+            sys.exit(1)
+            
+        print("Database initialized and verified!", flush=True)
+        
         bot.run(DISCORD_TOKEN)
     except Exception as e:
         print(f"Error running bot: {e}", flush=True)
