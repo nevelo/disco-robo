@@ -1107,6 +1107,108 @@ async def bot_create_player(ctx, *, args):
         # Log the full error for debugging
         print(f"Error in create_player: {e}", flush=True)
 
+@bot.command(name="edit_team")
+@log_command()
+@is_privileged()
+async def bot_edit_team(ctx, *, args):
+    """Edit a team's information.
+    Usage: !edit_team id=123 field=value
+    
+    Valid fields:
+    - name: Team name
+    - season: Season name
+    - year: Year (must be current year or later)
+    - home_colour: Home jersey colour
+    - away_colour: Away jersey colour
+    
+    Available colours: black, white, green, blue, yellow, orange, brown, red, purple, rainbow
+    
+    Example: !edit_team id=123 name="New Team Name" home_colour="blue"
+    """
+    try:
+        params = parse_args(args)
+        team_id = int(params.get('id', 0))
+        
+        if not team_id:
+            raise ValueError("Team ID is required")
+
+        # Remove id from params to process remaining fields
+        del params['id']
+
+        with SessionLocal() as session:
+            # Verify team exists first
+            team_name = get_team_data(session, team_id, param='name')
+            if not team_name:
+                raise ValueError(f"No team found with ID {team_id}")
+
+            # Map command parameters to database field names
+            field_mapping = {
+                'name': 'name',
+                'season': 'season',
+                'year': 'year',
+                'home_colour': 'home_colour',
+                'away_colour': 'away_colour',
+                'home_color': 'home_colour',  # Support US spelling
+                'away_color': 'away_colour'   # Support US spelling
+            }
+            
+            updates = {}
+            # Process each provided field
+            for field, value in params.items():
+                value = value.strip('"')
+                db_field = field_mapping.get(field)
+                if not db_field:
+                    await ctx.send(f"Warning: Field '{field}' is not a valid field name")
+                    continue
+
+                # Validate specific fields
+                if db_field == 'year':
+                    try:
+                        year = int(value)
+                        current_year = datetime.now().year
+                        if year < current_year:
+                            raise ValueError(f"Year must be {current_year} or later")
+                        updates[db_field] = year
+                    except ValueError as ve:
+                        if "must be" in str(ve):
+                            raise ve
+                        raise ValueError("Year must be a valid number")
+                
+                elif db_field in ['home_colour', 'away_colour']:
+                    color = value.lower()
+                    if color not in circles:
+                        raise ValueError(f"Invalid colour. Available colours: {', '.join(circles.keys())}")
+                    updates[db_field] = color
+                
+                else:
+                    updates[db_field] = value
+
+            # Apply updates
+            if updates:
+                edit_team(session, team_id, **updates)
+                
+                # Format success message with any colour changes
+                msg = f"✅ Team {team_id} updated successfully!\n"
+                if 'home_colour' in updates or 'away_colour' in updates:
+                    team_data = {
+                        'name': get_team_data(session, team_id, 'name'),
+                        'home_colour': get_team_data(session, team_id, 'home_colour'),
+                        'away_colour': get_team_data(session, team_id, 'away_colour')
+                    }
+                    home_circle = circles.get(team_data['home_colour'].lower(), "⚪")
+                    away_circle = circles.get(team_data['away_colour'].lower(), "⚪")
+                    msg += f"Team colours: Home={home_circle} Away={away_circle}"
+                
+                await ctx.send(msg)
+            else:
+                await ctx.send("No valid fields provided for update")
+
+    except ValueError as ve:
+        await ctx.send(f"Error: {str(ve)}")
+    except Exception as e:
+        await ctx.send(f"An unexpected error occurred: {str(e)}")
+        print(f"Error in edit_team: {e}", flush=True)
+
 @bot.command(name="add_player")
 @log_command()
 @is_privileged()
