@@ -1304,6 +1304,9 @@ async def on_ready():
     init_db(config["database_url"], echo=True)
     print("Database initialized!")
     
+    # Start the scheduler
+    scheduler.start()
+
     # Start the message check loop
     check_messages.start()
     print("Message check loop started!")
