@@ -381,59 +381,75 @@ React with {EMOJI_THUMBS_UP} or {EMOJI_THUMBS_DOWN}
 
 
 # Commands for interfacing with database.
-
 @bot.command(name="schedule")
 @log_command()
 async def bot_get_schedule(ctx):
-    """Display the schedule for tracked teams.
-    Usage: !schedule
-    
-    Shows all upcoming games for the team(s) being tracked by this bot instance.
-    Configure tracked teams in config/config.json under "tracked_teams".
-    """
+    """Display upcoming games in a formatted table."""
     try:
-        # Get tracked teams from config
         tracked_teams = get_tracked_teams()
         if not tracked_teams:
             await ctx.send("No teams are currently being tracked. Add team IDs to config/config.json")
             return
 
         with SessionLocal() as session:
-            # Get games for each tracked team
-            for team_id in tracked_teams:
-                team_name = get_team_data(session, team_id, param='name')
-                games = get_team_games(session, team_id)
-                if not games:
-                    await ctx.send(f"No scheduled games found for {team_name}")
-                    continue
+            now = datetime.now()
+            future = now + timedelta(days=30)
+            upcoming_games = get_upcoming_games(session, now, future)
+            
+            if not upcoming_games:
+                await ctx.send("No upcoming games scheduled.")
+                return
 
-                # Build schedule message
-                schedule_msg = [f"📅 Schedule for {team_name}:"]
-                for game in games:
-                    # Determine if team is home or away
-                    is_home = game.hometeam_id == team_id
-                    opponent = game.awayteam if is_home else game.hometeam
-                    home_away = "vs" if is_home else "@"
+            # Calculate column widths
+            date_width = max([len(game.datetime.strftime("%b-%d")) for game in upcoming_games])
+            time_width = max([len(game.datetime.strftime("%-I:%M %p")) for game in upcoming_games])
+            teams_width = max([
+                len(f"{game.awayteam.name} vs {game.hometeam.name}") + 4  # +4 for team circles
+                for game in upcoming_games
+            ])
+            park_width = max([
+                len(f"{game.park} {game.field}") 
+                for game in upcoming_games
+            ])
 
-                    # Format the game info  #TODO: Format as table, one line per game
-                    weekday = game.datetime.strftime("%A")
-                    month = game.datetime.strftime("%B")
-                    day = str(game.datetime.day)  # This will not have leading zeros
-                    date_str = f"{weekday}, {month} {day}"
-                    time_str = game.datetime.strftime("%I:%M %p")
-                    game_line = (
-                        f"{date_str} {time_str}\n"
-                        f"{EMOJI_DISC} {team_name} {home_away} {opponent.name}\n"
-                        f"{EMOJI_MAP} {game.park}, Field {game.field}\n"
-                    )
-                    schedule_msg.append(game_line)
+            # Add padding and minimum widths
+            date_width = max(date_width, 8)
+            time_width = max(time_width, 8)
+            teams_width = max(teams_width, 20)
+            park_width = max(park_width, 10)
 
-                # Send the schedule
-                await ctx.send("\n".join(schedule_msg))
+            # Build the table
+            lines = []
+            lines.append("Game Schedule")
+            lines.append("|" + "-" * (date_width + time_width + teams_width + park_width + 13) + "|")
+            lines.append(
+                f"| {'DATE':^{date_width}} | {'TIME':^{time_width}} "
+                f"| {'TEAMS':^{teams_width}} | {'PARK':^{park_width}} |"
+            )
+            lines.append("|" + "-" * (date_width + time_width + teams_width + park_width + 13) + "|")
+
+            for game in upcoming_games:
+                date_str = game.datetime.strftime("%b-%d")
+                time_str = game.datetime.strftime("%-I:%M %p")
+                
+                away_color = circles.get(game.awayteam.away_colour.lower(), "⚪")
+                home_color = circles.get(game.hometeam.home_colour.lower(), "⚪")
+                teams_str = f"{away_color}{game.awayteam.name} vs {home_color}{game.hometeam.name}"
+                
+                park_str = f"{game.park} {game.field}"
+                
+                lines.append(
+                    f"| {date_str:^{date_width}} | {time_str:^{time_width}} "
+                    f"| {teams_str:<{teams_width}} | {park_str:<{park_width}} |"
+                )
+            
+            lines.append("|" + "-" * (date_width + time_width + teams_width + park_width + 13) + "|")
+            
+            await ctx.send("```\n" + "\n".join(lines) + "\n```")
 
     except Exception as e:
-        await ctx.send(f"Error retrieving schedule: {str(e)}")
-        print(f"Error in get_schedule: {e}", flush=True)
+        await ctx.send(f"Error displaying schedule: {str(e)}")
+        print(f"Error in schedule command: {e}", flush=True)
 
 @bot.command(name="set_attendance")
 @log_command()
@@ -903,7 +919,7 @@ async def bot_create_player(ctx, *, args):
         gender = params.get('gender', '').lower()
         
         if not all([lastname, firstname]):
-            raise ValueError("Missing required parameters")
+            raise ValueError("Missing required parameters -- requires a first and last name")
         
         if gender not in ['m', 'f', 'o']:
             raise ValueError("Gender must be 'm', 'f', or 'o'")
@@ -914,17 +930,22 @@ async def bot_create_player(ctx, *, args):
         
         if discord_param:
             try:
-                # First try to parse as ID
-                user_id = int(discord_param)
-                discord_user = await bot.fetch_user(user_id)
-            except ValueError:
-                # If not an ID, try as username
-                # Note: This requires the members intent to be enabled
-                guild = ctx.guild
-                if guild:
-                    discord_user = await guild.fetch_member_named(discord_param)
-            except NotFound:
-                await ctx.send(f"Warning: Could not find Discord user with ID {discord_param}")
+                # If it's a member of the current guild
+                if ctx.guild:
+                    # Search through guild members
+                    members = await ctx.guild.fetch_members().flatten()
+                    discord_user = next(
+                        (m for m in members if 
+                         m.name == discord_param or 
+                         str(m.id) == discord_param or
+                         m.display_name == discord_param),
+                        None
+                    )
+                
+                # If not found in guild, try direct user fetch by ID
+                if not discord_user and discord_param.isdigit():
+                    discord_user = await bot.fetch_user(int(discord_param))
+                    
             except Exception as e:
                 await ctx.send(f"Warning: Error looking up Discord user: {str(e)}")
         
@@ -948,7 +969,7 @@ async def bot_create_player(ctx, *, args):
             if discord_user:
                 await ctx.send(f"Player created successfully! Player ID: {player.id}\nLinked to Discord user: {discord_user.name} (ID: {discord_user.id})")
             else:
-                await ctx.send(f"Player created successfully! Player ID: {player.id}\nNo Discord user linked")
+                await ctx.send(f"Player created successfully! Player ID: {player.id}\nDiscord username stored but user not found: {discord_param}")
 
     except Exception as e:
         await ctx.send(f"Error creating player: {str(e)}")
