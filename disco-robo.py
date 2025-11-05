@@ -404,32 +404,34 @@ async def bot_get_schedule(ctx):
                 return
 
             # Calculate column widths
-            date_width = max([len(game.datetime.strftime("%b-%d")) for game in upcoming_games])
-            time_width = max([len(game.datetime.strftime("%-I:%M %p")) for game in upcoming_games])
+            date_width = 8  # Fixed width for "MMM-DD"
+            time_width = 8  # Fixed width for "H:MM PM"
+            
+            # Calculate max team name lengths including emojis
             teams_width = max([
-                len(f"{game.awayteam.name} vs {game.hometeam.name}") + 4  # +4 for team circles
-                for game in upcoming_games
+                len(f"{g.awayteam.name} vs {g.hometeam.name}") + 4  # +4 for team circles
+                for g in upcoming_games
             ])
+            teams_width = max(teams_width, 20)  # Minimum width
+            
             park_width = max([
-                len(f"{game.park} {game.field}") 
-                for game in upcoming_games
+                len(f"{g.park} {g.field}") 
+                for g in upcoming_games
             ])
+            park_width = max(park_width, 10)  # Minimum width
 
-            # Add padding and minimum widths
-            date_width = max(date_width, 8)
-            time_width = max(time_width, 8)
-            teams_width = max(teams_width, 20)
-            park_width = max(park_width, 10)
+            # Total width including borders and spacing
+            total_width = date_width + time_width + teams_width + park_width + 13
 
             # Build the table
             lines = []
             lines.append("Game Schedule")
-            lines.append("|" + "-" * (date_width + time_width + teams_width + park_width + 13) + "|")
+            lines.append("+" + "-" * (total_width - 2) + "+")
             lines.append(
                 f"| {'DATE':^{date_width}} | {'TIME':^{time_width}} "
                 f"| {'TEAMS':^{teams_width}} | {'PARK':^{park_width}} |"
             )
-            lines.append("|" + "-" * (date_width + time_width + teams_width + park_width + 13) + "|")
+            lines.append("+" + "-" * (total_width - 2) + "+")
 
             for game in upcoming_games:
                 date_str = game.datetime.strftime("%b-%d")
@@ -437,6 +439,8 @@ async def bot_get_schedule(ctx):
                 
                 away_color = circles.get(game.awayteam.away_colour.lower(), "⚪")
                 home_color = circles.get(game.hometeam.home_colour.lower(), "⚪")
+                
+                # Format teams with consistent spacing around 'vs'
                 teams_str = f"{away_color}{game.awayteam.name} vs {home_color}{game.hometeam.name}"
                 
                 park_str = f"{game.park} {game.field}"
@@ -446,7 +450,7 @@ async def bot_get_schedule(ctx):
                     f"| {teams_str:<{teams_width}} | {park_str:<{park_width}} |"
                 )
             
-            lines.append("|" + "-" * (date_width + time_width + teams_width + park_width + 13) + "|")
+            lines.append("+" + "-" * (total_width - 2) + "+")
             
             await ctx.send("```\n" + "\n".join(lines) + "\n```")
 
