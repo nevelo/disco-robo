@@ -31,7 +31,7 @@ from db_utils import (
     UNKNOWN_DISCORD
 )
 
-VERSION_NUMBER = "0.2.2"
+VERSION_NUMBER = "0.2.3"
 
 DISCORD_TOKEN = None
 DATABASE_URL = None
@@ -211,7 +211,19 @@ circles = {
     "rainbow": "\U0001F308",
 }
 
-async def send_game_announcement(game_id: int):
+
+ 
+
+
+
+def create_game_announcement_msg(
+    game_id: int,
+    awayteam: str,
+    hometeam: str,
+    gametime: str,
+    park: str,
+    field: int,
+):
     with SessionLocal() as session:
         home_id = get_game_data(session, game_id, "hometeam_id")
         if (home_id == None):
@@ -223,45 +235,24 @@ async def send_game_announcement(game_id: int):
         hometeam = get_team_data(session, home_id, "name")
         awayteam = get_team_data(session, away_id, "name")
         away_colour = get_team_data(session, away_id, "away_colour")
-        home_colour = get_team_data(session, home_id, "home_colour")    
-
-    await _send_game_announcement(
-        game_id=game_id,
-        awayteam=awayteam,
-        hometeam=hometeam,
-        away_colour=away_colour,
-        home_colour=home_colour,
-        gametime=gametime,
-        park=park,
-        field=field
-    )
-
-async def _send_game_announcement(
-    game_id: int,
-    awayteam: str,
-    hometeam: str,
-    team_colour: str,
-    opp_colour: str,
-    gametime: str,   # for now -- switch to unix time once the bot is more interactive
-    park: str,
-    field: int
-):
-    """Post initial game announcement and return the message for reaction tracking"""
-    channel = bot.get_channel(CHANNELS["announcements"]) or await bot.fetch_channel(CHANNELS["announcements"])
-    team_colour_emoji = circles.get(team_colour, CONFUSED_EMOJI)
-    opp_colour_emoji = circles.get(opp_colour, CONFUSED_EMOJI)
-
-    # Get current attendance
-    with SessionLocal() as session:
+        home_colour = get_team_data(session, home_id, "home_colour")   
+    
         attendance = get_game_attendance(session, game_id)
         attending = [f"{p.real_first} {p.real_last}" for p in attendance["attending"]]
         not_attending = [f"{p.real_first} {p.real_last}" for p in attendance["not_attending"]]
         pending = [f"{p.real_first} {p.real_last}" for p in attendance["pending"]]
 
+    away_colour_emoji = circles.get(away_colour, CONFUSED_EMOJI)
+    home_colour_emoji = circles.get(home_colour, CONFUSED_EMOJI)
+
+    attending = [f"{p.real_first} {p.real_last}" for p in attendance["attending"]]
+    not_attending = [f"{p.real_first} {p.real_last}" for p in attendance["not_attending"]]
+    pending = [f"{p.real_first} {p.real_last}" for p in attendance["pending"]]
+
     msg_content = f"""```
 {EMOJI_DISC} {EMOJI_DISC} GAME ALERT!! {EMOJI_DISC} {EMOJI_DISC}
 
-{team_colour_emoji} {awayteam} vs {opp_colour_emoji} {hometeam}
+{away_colour_emoji} {awayteam} vs {home_colour_emoji} {hometeam}
 
 {EMOJI_CLOCK} {gametime}
 {EMOJI_MAP} {park}, Field {field}
@@ -272,6 +263,14 @@ async def _send_game_announcement(
 
 React with {EMOJI_THUMBS_UP} or {EMOJI_THUMBS_DOWN} to update your status!
 ```"""
+    return msg_content
+
+
+async def send_game_announcement(game_id: int):
+    """Post initial game announcement and return the message for reaction tracking"""
+    channel = bot.get_channel(CHANNELS["announcements"]) or await bot.fetch_channel(CHANNELS["announcements"]) 
+
+    msg_content = create_game_announcement_msg(game_id)
     msg = await channel.send(msg_content)
 
     # Add reactions for attendance tracking
@@ -1481,6 +1480,26 @@ async def bot_edit_game(ctx, *, args):
 
 ## --- Tasks and Event Handlers --- 
 
+@tasks.loop(minutes=5)
+@log_task("reconnect")
+async def connection_monitor():
+    """Check connection status every minute"""
+    logger = BotLogger.get_logger()
+    if not bot.is_closed() and bot.is_ready():
+        try:
+            # Test connection with a simple API call
+            await bot.fetch_user(bot.user.id)
+            #logger.info("Connection check: OK")
+        except Exception as e:
+            logger.error(f"Connection check failed: {e}")
+            logger.warning("Connection lost, discord.py will auto-reconnect")
+    elif bot.is_closed():
+        logger.warning("Bot is closed")
+
+@connection_monitor.before_loop
+async def before_connection_monitor():
+    await bot.wait_until_ready()
+
 @tasks.loop(hours=1)
 @log_task("check_messages")
 async def check_messages():
@@ -1575,6 +1594,18 @@ async def on_ready():
     team_channel = get_announcement_channel_id()
     channel = bot.get_channel(bot_channel) or await bot.fetch_channel(bot_channel)
     await channel.send("I'm... alive!") 
+    logger = BotLogger.get_logger()
+    logger.info(f'{bot.user} has connected to Discord.')
+
+@bot.event
+async def on_disconnect():
+    logger = BotLogger.get_logger()
+    logger.warning('Bot disconnected from Discord')
+
+@bot.event
+async def on_resumed():
+    logger = BotLogger.get_logger()
+    logger.info('Bot resumed connection to Discord')
 
 @bot.event
 @log_event("reaction_add")
@@ -1609,8 +1640,17 @@ async def on_raw_reaction_add(payload):
             # Update attendance
             set_attendance_status(session, game_id, player.id, status)
             
-        # Update message with new attendance
+            # Update message with new attendance
+            msgs = get_game_messages(session, game_id)
+            announcement_msg_id = msgs.get('announcement_msg')
 
+            if not announcement_msg_id:
+                return
+            
+            updated_msg_content = create_game_announcement_msg(game_id)
+            announcement_channel = bot.get_channel(CHANNELS["announcements"]) or await bot.fetch_channel(CHANNELS["announcements"])
+            announcement_msg = await announcement_channel.fetch_message(announcement_msg_id)
+            await announcement_msg.edit(content=updated_msg_content)
 
     except Exception as e:
         print(f"Error handling reaction: {e}", flush=True)
