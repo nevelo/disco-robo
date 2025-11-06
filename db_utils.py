@@ -670,8 +670,8 @@ def get_game_data(
 
 def get_upcoming_games(
     session: Session,
-    current_time = datetime,
-    future_time = datetime
+    current_time: datetime,
+    future_time: datetime
 ):
     """Get all upcoming games within a certain time delta.
     

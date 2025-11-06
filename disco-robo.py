@@ -31,6 +31,8 @@ from db_utils import (
     UNKNOWN_DISCORD
 )
 
+VERSION_NUMBER = "0.2.2"
+
 DISCORD_TOKEN = None
 DATABASE_URL = None
 LOGFILE = None
@@ -162,6 +164,7 @@ EMOJI_WARNING        = "\u26A0\uFE0F"
 EMOJI_SIREN          = "\U0001F6A8"
 
 CONFUSED_EMOJI       = "\u2049\uFE0F"
+THIN_SPACE           = "\u2009"
 
 # Skin tone modifiers
 SKIN_TONE_LIGHT         = "\U0001F3FB"
@@ -204,6 +207,7 @@ circles = {
     "brown":   "\U0001F7E4",
     "red":     "\U0001F534",
     "purple":  "\U0001F7E3",
+    "pink":    "\U0001FA77",
     "rainbow": "\U0001F308",
 }
 
@@ -403,56 +407,37 @@ async def bot_get_schedule(ctx):
                 await ctx.send("No upcoming games scheduled.")
                 return
 
-            # Calculate column widths
-            date_width = 8  # Fixed width for "MMM-DD"
-            time_width = 8  # Fixed width for "H:MM PM"
-            
-            # Calculate team name widths
-            max_team1_width = max([len(f"{g.awayteam.name}") + 1 for g in upcoming_games])  # +1 for emoji
-            max_team2_width = max([len(f"{g.hometeam.name}") + 1 for g in upcoming_games])  # +1 for emoji
-            vs_padding = 4  # Space around "vs"
-            teams_width = max_team1_width + max_team2_width + vs_padding + 8  # +2 for spacing
-            
-            park_width = max([
-                len(f"{g.park} {g.field}") 
-                for g in upcoming_games
-            ])
-            park_width = max(park_width, 10)  # Minimum width
-
-            # Total width including borders and spacing
-            total_width = date_width + time_width + teams_width + park_width + 16
-
             # Build the table
             lines = []
-            lines.append("Game Schedule")
-            border = "+" + "-" * (total_width - 2) + "+"
-            lines.append(border)
-            lines.append(
-                f"| {'DATE':^{date_width}} | {'TIME':^{time_width}} "
-                f"| {'TEAMS':^{teams_width + 3}} | {'LOCATION':^{park_width}} |"
-            )
-            lines.append(border)
+            lines.append("UPCOMING GAMES")
+            lines.append("-" * 45)  # Horizontal line
 
             for game in upcoming_games:
-                date_str = game.datetime.strftime("%b-%d")
-                time_str = game.datetime.strftime("%-I:%M %p")
-                
+                date_str = game.datetime.strftime("%b %d")
+                if (date_str[4] == "0"):
+                    date_str = date_str[:4] + ' ' + date_str[5:]  # Remove leading zero from day
+                hour_str = game.datetime.strftime("%I")
+                if (hour_str[0] == "0"):
+                    hour_str = ' ' + hour_str[1:]  # Remove leading zero from hour
+                minute = game.datetime.strftime("%M")
+                ampm = game.datetime.strftime("%p").lower()
+                time_str = f"{hour_str}:{minute}{ampm}"
+
                 away_color = circles.get(game.awayteam.away_colour.lower(), CONFUSED_EMOJI)
                 home_color = circles.get(game.hometeam.home_colour.lower(), CONFUSED_EMOJI)
                 
-                # Format teams with consistent spacing
-                team1 = f"{away_color}{game.awayteam.name}"
-                team2 = f"{home_color}{game.hometeam.name}"
-                teams_str = f"{team1:<{max_team1_width}}   vs  {team2:<{max_team2_width}}"
+                # Format header line (date, time, location)
+                header = f"{date_str}  {time_str}                 {game.park} {game.field}"
+                lines.append(header)
                 
-                park_str = f"{game.park} {game.field}"
+                # Format teams line
+                away_name = game.awayteam.name[:20]  # Limit team name length
+                home_name = game.hometeam.name[:20]  # Limit team name length
                 
-                lines.append(
-                    f"| {date_str:^{date_width}} | {time_str:^{time_width}} "
-                    f"| {teams_str:<{teams_width}} | {park_str:<{park_width}} |"
-                )
-            
-            lines.append(border)
+                # Construct team line with consistent vs positioning
+                team_line = f"{away_color}{THIN_SPACE}{away_name:<20} vs  {home_color}{THIN_SPACE}{home_name}"
+                lines.append(team_line)
+                lines.append("")  # Add blank line between games
             
             await ctx.send("```\n" + "\n".join(lines) + "\n```")
 
@@ -865,6 +850,23 @@ async def bot_delete_game(ctx, *, args):
         await ctx.send(f"An unexpected error occurred: {str(e)}")
         # Log the full error for debugging
         print(f"Error in delete_game: {e}", flush=True)
+
+@bot.command(name="info")
+@log_command()
+async def bot_info(ctx):
+    """Display bot version and information."""
+    try:
+        lines = []
+        lines.append(f"{EMOJI_DISC} disco-robo v{VERSION_NUMBER}")
+        lines.append("")
+        lines.append("More info at")
+        lines.append("https://github.com/nevelo/disco-robo")
+        
+        await ctx.send("```\n" + "\n".join(lines) + "\n```")
+
+    except Exception as e:
+        await ctx.send(f"Error displaying info: {str(e)}")
+        print(f"Error in info command: {e}", flush=True)
 
 @bot.command(name="roster")
 @log_command()

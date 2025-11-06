@@ -1,7 +1,9 @@
 import unittest
 import os
 import asyncio
-from unittest.mock import Mock, patch
+import importlib.util
+import importlib.machinery
+from unittest.mock import Mock, patch, DEFAULT
 from discord import NotFound
 from datetime import datetime
 from sqlalchemy import create_engine
@@ -175,15 +177,24 @@ class MockGuild:
     def __init__(self):
         self.members = {}  # Dict of username -> MockMember
 
-    async def fetch_member_named(self, username):
-        """Simulate fetching a member by their username"""
-        return self.members.get(username)
+    async def fetch_members(self, *, limit=1000):
+        """Simulate the async iterator for fetching members"""
+        for member in self.members.values():
+            yield member
+
+    async def fetch_member(self, member_id):
+        """Simulate fetching a member by their ID"""
+        for member in self.members.values():
+            if str(member.id) == str(member_id):
+                return member
+        raise NotFound('Member not found')
 
 class MockMember:
     """Mock Discord member object"""
     def __init__(self, id, name):
         self.id = id
         self.name = name
+        self.display_name = name  # Add display_name to match Discord's Member object
 
 class MockContext:
     """Mock Discord context object"""
@@ -198,10 +209,101 @@ class MockContext:
 class TestDiscordCommands(unittest.TestCase):
     def setUp(self):
         """Set up test database and mocks"""
+        global importlib
         # Create in-memory test database
         self.engine = create_engine('sqlite:///:memory:', echo=False)
         Base.metadata.create_all(self.engine)
         self.Session = sessionmaker(bind=self.engine)
+
+        # Create mock config
+        self.mock_config = {
+            "tracked_teams": [1],  # Cobra Snakes is the default tracked team
+            "privileged_users": [12345],
+            "timezone": "America/Toronto",
+            "channels": {
+                "announcements": None,
+                "bot_commands": None
+            }
+        }
+        
+        # Initialize command iterator
+        self.commands = CommandIterator()
+
+        # Create mock context and bot
+        self.ctx = MockContext()
+        self.bot = MockBot()
+
+        # Set up mock Discord members in the guild
+        test_members = [
+            # First test members
+            ("johna1234", "123456789123456789"),
+            ("sconnor", "223456789123456789"),
+            ("akim", "323456789123456789"),
+            ("mrodriguez", "423456789123456789"),
+            ("echen123", "523456789123456789"),
+            ("staylor", "623456789123456789"),
+            
+            # Winter league members
+            ("mthompson_92", "723456789123456789"),
+            ("ninachen_", "823456789123456789"),
+            ("becca528", "923456789123456789"),
+            ("dparker807", "1023456789123456789"),
+            ("twright054", "1123456789123456789"),
+            ("sophiaa", "1223456789123456789"),
+            ("lc660", "1323456789123456789"),
+            ("emmafisher", "1423456789123456789"),
+            ("ryan_33", "1523456789123456789"),
+            ("isaturner", "1623456789123456789"),
+            ("mhayes", "1723456789123456789"),
+            ("rbennett97", "1823456789123456789")
+        ]
+        
+        for username, user_id in test_members:
+            member = MockMember(id=user_id, name=username)
+            self.ctx.guild.members[username] = member
+            self.bot._users[user_id] = member
+
+        # Set up the date mock BEFORE loading the module
+        mock_date = datetime(2025, 10, 1)
+        
+        # Create a real datetime subclass that overrides now() but still passes isinstance checks
+        class MockDatetime(datetime):
+            @classmethod
+            def now(cls, tz=None):
+                return mock_date.replace(tzinfo=tz) if tz else mock_date
+        
+        # Store MockDatetime for use in other patches
+        self.MockDatetime = MockDatetime
+        
+        # Patch datetime in the datetime module BEFORE importing disco-robo
+        self.datetime_patch = patch('datetime.datetime', MockDatetime)
+        self.datetime_patch.start()
+        
+        # Import disco-robo with our mock bot
+        loader = importlib.machinery.SourceFileLoader("disco_robo", "disco-robo.py")
+        spec = importlib.util.spec_from_file_location("disco_robo", "disco-robo.py", loader=loader)
+        self.disco_robo = importlib.util.module_from_spec(spec)
+        
+        # Replace the real bot with our mock and execute the module
+        with patch('discord.ext.commands.Bot', return_value=self.bot):
+            loader.exec_module(self.disco_robo)
+
+        # Additional patches for test module
+        self.patches = [
+            patch('test_discord_commands.datetime', MockDatetime)       # test module's datetime
+        ]
+        
+        # Start all patches
+        for p in self.patches:
+            p.start()
+
+        # Set up other patches
+        self.privileged_patch = patch.object(self.disco_robo, 'is_privileged', return_value=lambda: True)
+        self.privileged_patch.start()
+        self.session_patch = patch.object(self.disco_robo, 'SessionLocal', self.Session)
+        self.session_patch.start()
+        self.config_patch = patch.object(self.disco_robo, 'load_config', return_value=self.mock_config)
+        self.config_patch.start()
 
         # Create a mock config
         self.mock_config = {
@@ -272,6 +374,10 @@ class TestDiscordCommands(unittest.TestCase):
         self.privileged_patch.stop()
         self.session_patch.stop()
         self.config_patch.stop()
+        self.datetime_patch.stop()
+        # Stop all datetime patches
+        for patch in self.patches:
+            patch.stop()
         Base.metadata.drop_all(self.engine)
         self.engine.dispose()
 
@@ -715,10 +821,15 @@ class TestDiscordCommands(unittest.TestCase):
 
             # Verify schedule includes all games
             schedule_text = '\n'.join(responses)
+            # Check for team names (they might be truncated in mobile format)
             self.assertIn("Cobra Snakes", schedule_text)
-            self.assertIn("November 15", schedule_text)
-            self.assertIn("November 23", schedule_text)
-            self.assertIn("November 30", schedule_text)
+            # Check for dates in new format (Nov 15, Nov 23)
+            self.assertIn("Nov 15", schedule_text)
+            self.assertIn("Nov 23", schedule_text)
+            # Verify format markers
+            self.assertIn("UPCOMING GAMES", schedule_text)
+            self.assertIn(" vs ", schedule_text)
+            self.assertIn("Nov 30", schedule_text)
             self.assertIn("Python Pirates", schedule_text)
             self.assertIn("Red Dragons", schedule_text)
             self.assertIn("Green Geckos", schedule_text)
@@ -908,6 +1019,9 @@ class TestDiscordCommands(unittest.TestCase):
             self.assertIn("Michael Hayes (mhayes)", roster_text)
             self.assertIn("Robert Bennett (rbennett97)", roster_text)
 
+            # Reset the mock date to before all test games
+            self.assertEqual(datetime.now(), datetime(2025, 10, 1))
+
             # Test schedule
             schedule_command = '!schedule'
             responses = await self.execute_command(schedule_command)
@@ -929,17 +1043,17 @@ class TestDiscordCommands(unittest.TestCase):
             self.assertIn("Air Masters", schedule_text)
             
             # Verify all game dates appear
-            self.assertIn("October 26", schedule_text)
-            self.assertIn("November 2", schedule_text)
-            self.assertIn("November 9", schedule_text)
-            self.assertIn("November 16", schedule_text)
-            self.assertIn("November 23", schedule_text)
-            self.assertIn("November 30", schedule_text)
-            self.assertIn("December 7", schedule_text)
-            self.assertIn("December 14", schedule_text)
+            self.assertIn("Oct 26", schedule_text)
+            self.assertIn("Nov  2", schedule_text)
+            self.assertIn("Nov  9", schedule_text)
+            self.assertIn("Nov 16", schedule_text)
+            self.assertIn("Nov 23", schedule_text)
+            self.assertIn("Nov 30", schedule_text)
+            self.assertIn("Dec  7", schedule_text)
+            self.assertIn("Dec 14", schedule_text)
             
             # Verify field locations
-            self.assertIn("Riverside, Field 1", schedule_text)
-            self.assertIn("Riverside, Field 2", schedule_text)
+            self.assertIn("Riverside 1", schedule_text)
+            self.assertIn("Riverside 2", schedule_text)
 
         self.run_async_test(run_test())
