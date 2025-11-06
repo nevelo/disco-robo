@@ -268,9 +268,13 @@ React with {EMOJI_THUMBS_UP} or {EMOJI_THUMBS_DOWN} to update your status!
 
 async def send_game_announcement(game_id: int):
     """Post initial game announcement and return the message for reaction tracking"""
-    channel = bot.get_channel(CHANNELS["announcements"]) or await bot.fetch_channel(CHANNELS["announcements"]) 
+    announcement_channel_id = get_announcement_channel_id()
+    if not announcement_channel_id:
+        raise ValueError("Announcement channel not configured in config.json")
+    channel = bot.get_channel(announcement_channel_id) or await bot.fetch_channel(announcement_channel_id) 
 
     msg_content = create_game_announcement_msg(game_id)
+    
     msg = await channel.send(msg_content)
 
     # Add reactions for attendance tracking
@@ -281,6 +285,11 @@ async def send_game_announcement(game_id: int):
 
 async def send_bother_message(game_id: int):
     """Send message to bother pending players"""
+    announcement_channel_id = get_announcement_channel_id()
+    if not announcement_channel_id:
+        raise ValueError("Announcement channel not configured in config.json")
+    channel = bot.get_channel(announcement_channel_id) or await bot.fetch_channel(announcement_channel_id)
+
     with SessionLocal() as session:
         game = get_game_object(session, game_id)
         attendance = get_game_attendance(session, game_id)
@@ -291,7 +300,6 @@ async def send_bother_message(game_id: int):
             return
 
         mentions = " ".join(f"<@{p.discord_username}>" for p in pending_players)
-        channel = bot.get_channel(CHANNELS["announcements"]) or await bot.fetch_channel(CHANNELS["announcements"])
         
         msg_content = f"""```
 {EMOJI_BELL} ATTENDANCE REMINDER {EMOJI_BELL}
@@ -312,6 +320,11 @@ React with {EMOJI_THUMBS_UP} or {EMOJI_THUMBS_DOWN} to update your status!
 
 async def send_pester_message(game_id: int):
     """Send final warning to pending players"""
+    announcement_channel_id = get_announcement_channel_id()
+    if not announcement_channel_id:
+        raise ValueError("Announcement channel not configured in config.json")
+    channel = bot.get_channel(announcement_channel_id) or await bot.fetch_channel(announcement_channel_id)
+
     with SessionLocal() as session:
         game = get_game_object(session, game_id)
         attendance = get_game_attendance(session, game_id)
@@ -322,7 +335,6 @@ async def send_pester_message(game_id: int):
             return
 
         mentions = " ".join(f"<@{p.discord_username}>" for p in pending_players)
-        channel = bot.get_channel(CHANNELS["announcements"]) or await bot.fetch_channel(CHANNELS["announcements"])
         
         msg_content = f"""```
 {EMOJI_WARNING} URGENT ATTENDANCE CHECK {EMOJI_WARNING}
@@ -343,6 +355,11 @@ Please react with {EMOJI_THUMBS_UP} or {EMOJI_THUMBS_DOWN} ASAP!
 
 async def send_day_of_game_reminder_message(game_id: int):
     """Send day-of game reminder with current attendance status"""
+    announcement_channel_id = get_announcement_channel_id()
+    if not announcement_channel_id:
+        raise ValueError("Announcement channel not configured in config.json")
+    channel = bot.get_channel(announcement_channel_id) or await bot.fetch_channel(announcement_channel_id) 
+
     with SessionLocal() as session:
         game = get_game_object(session, game_id)
         if not game:
@@ -358,8 +375,6 @@ async def send_day_of_game_reminder_message(game_id: int):
         home_colour = game.hometeam.home_colour
         team_colour_emoji = circles.get(away_colour, CONFUSED_EMOJI)
         opp_colour_emoji = circles.get(home_colour, CONFUSED_EMOJI)
-
-        channel = bot.get_channel(CHANNELS["announcements"]) or await bot.fetch_channel(CHANNELS["announcements"])
         
         msg_content = f"""```
 {EMOJI_SIREN} {EMOJI_DISC} GAME TODAY!! {EMOJI_DISC} {EMOJI_SIREN}
