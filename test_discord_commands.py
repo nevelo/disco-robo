@@ -938,19 +938,15 @@ class TestDiscordCommands(unittest.TestCase):
             # Title is line 1, separator is line 2, headers are line 3
             self.assertIn("Team Roster: Cobra Snakes", roster_lines[1], "Missing team name")
             self.assertIn("FEMALE MATCHING", roster_lines[3], "Missing female matching header")
-            self.assertIn("OPEN MATCHING", roster_lines[3], "Missing open matching header")
+            self.assertIn("Emily Chen (echen123)", roster_lines[4])
+            self.assertIn("Sarah Connor (sconnor)", roster_lines[5])
+            self.assertIn("Maria Rodriguez (mrodriguez)", roster_lines[6])
             
-            # Then verify some specific players
-            # Female matching players
-            self.assertIn("Sarah Connor (sconnor)", roster_text)
-            self.assertIn("Maria Rodriguez (mrodriguez)", roster_text)
-            self.assertIn("Emily Chen (echen123)", roster_text)
-            
-            # Open matching players
-            self.assertIn("John Agda (johna1234)", roster_text)
-            self.assertIn("Alex Kim (akim)", roster_text)
-            self.assertIn("James Wilson", roster_text)  # No discord ID
-            self.assertIn("Sam Taylor (staylor)", roster_text)
+            self.assertIn("OPEN MATCHING", roster_lines[8], "Missing open matching header")
+            self.assertIn("John Agda (johna1234)", roster_lines[9])
+            self.assertIn("Alex Kim (akim)", roster_lines[10])
+            self.assertIn("James Wilson", roster_lines[12])  # No discord ID
+            self.assertIn("Sam Taylor (staylor)", roster_lines[11])           
 
         self.run_async_test(run_test())
 

@@ -920,32 +920,29 @@ async def bot_get_roster(ctx, *, args):
             # Build the roster display
             lines = []
             lines.append(f"Team Roster: {team_name}")
-            lines.append("|" + "-" * (col_width * 2 + 5) + "|")  # 5 for margins and separator
-            lines.append(f"| {'FEMALE MATCHING'.ljust(col_width)} | {'OPEN MATCHING'.ljust(col_width)} |")
-            lines.append("|" + "-" * (col_width * 2 + 5) + "|")
+            lines.append("")
+            
+            # Add female matching players
+            lines.append("FEMALE MATCHING:")
+            if female_matching:
+                for player in female_matching:
+                    name = f"{player.real_first} {player.real_last}"
+                    discord = f"({player.discord_username})" if player.discord_username else ""
+                    lines.append(f"  {name} {discord}")
+            else:
+                lines.append("  (none)")
+            lines.append("")
+            
+            # Add open matching players
+            lines.append("OPEN MATCHING:")
+            if open_matching:
+                for player in open_matching:
+                    name = f"{player.real_first} {player.real_last}"
+                    discord = f"({player.discord_username})" if player.discord_username else ""
+                    lines.append(f"  {name} {discord}")
+            else:
+                lines.append("  (none)")
 
-            # Create rows, padding shorter list with empty strings
-            max_rows = max(len(female_matching), len(open_matching))
-            for i in range(max_rows):
-                f_player = female_matching[i] if i < len(female_matching) else None
-                o_player = open_matching[i] if i < len(open_matching) else None
-                
-                f_text = ""
-                if f_player:
-                    f_text = f"{f_player.real_first} {f_player.real_last}"
-                    if f_player.discord_username:  # None and empty string both evaluate to False
-                        f_text += f" ({f_player.discord_username})"
-                
-                o_text = ""
-                if o_player:
-                    o_text = f"{o_player.real_first} {o_player.real_last}"
-                    if o_player.discord_username:  # None and empty string both evaluate to False
-                        o_text += f" ({o_player.discord_username})"
-                
-                lines.append(f"| {f_text.ljust(col_width)} | {o_text.ljust(col_width)} |")
-            
-            lines.append("|" + "-" * (col_width * 2 + 5) + "|")
-            
             await ctx.send("```\n" + "\n".join(lines) + "\n```")
 
     except ValueError as ve:
