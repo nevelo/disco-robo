@@ -227,27 +227,12 @@ def create_game_announcement_msg(
             awayteam = get_team_data(session, away_id, "name")
             away_colour = get_team_data(session, away_id, "away_colour")
             home_colour = get_team_data(session, home_id, "home_colour")   
-        
-            print(f"DEBUG: home_id = {home_id} (type: {type(home_id)})", flush=True)
-            print(f"DEBUG: away_id = {away_id} (type: {type(away_id)})", flush=True)
-            print(f"DEBUG: gametime = {gametime} (type: {type(gametime)})", flush=True)
-            print(f"DEBUG: park = {park} (type: {type(park)})", flush=True)
-            print(f"DEBUG: field = {field} (type: {type(field)})", flush=True)
-            print(f"DEBUG: hometeam = {hometeam} (type: {type(hometeam)})", flush=True)
-            print(f"DEBUG: awayteam = {awayteam} (type: {type(awayteam)})", flush=True)
-            print(f"DEBUG: away_colour = {away_colour} (type: {type(away_colour)})", flush=True)
-            print(f"DEBUG: home_colour = {home_colour} (type: {type(home_colour)})", flush=True)
 
             attendance = get_game_attendance(session, game_id)
             attending = [f"{p.real_first} {p.real_last}" for p in attendance["attending"]]
             not_attending = [f"{p.real_first} {p.real_last}" for p in attendance["not_attending"]]
             pending = [f"{p.real_first} {p.real_last}" for p in attendance["pending"]]
 
-            print(f"DEBUG: attendance keys = {attendance.keys()}", flush=True)
-            print(f"DEBUG: attending = {attending} (type: {type(attending)})", flush=True)
-            print(f"DEBUG: not_attending = {not_attending} (type: {type(not_attending)})", flush=True)
-            print(f"DEBUG: pending = {pending} (type: {type(pending)})", flush=True)
-            
         except Exception as e:
             print(f"DEBUG: Error getting game data: {e}", flush=True)
             import traceback
@@ -260,13 +245,7 @@ def create_game_announcement_msg(
     attending_str = ", ".join(attending) if attending else "(none)"
     not_attending_str = ", ".join(not_attending) if not_attending else "(none)"
     pending_str = ", ".join(pending) if pending else "(none)"
-
-    print(f"DEBUG: away_colour_emoji = {away_colour_emoji} (type: {type(away_colour_emoji)})", flush=True)
-    print(f"DEBUG: home_colour_emoji = {home_colour_emoji} (type: {type(home_colour_emoji)})", flush=True)
-    print(f"DEBUG: attending_str = {attending_str} (type: {type(attending_str)})", flush=True)
-    print(f"DEBUG: not_attending_str = {not_attending_str} (type: {type(not_attending_str)})", flush=True)
-    print(f"DEBUG: pending_str = {pending_str} (type: {type(pending_str)})", flush=True)
-    
+  
     try:
         gametime_str = gametime.strftime('%A, %B %d at %I:%M %p')
         print(f"DEBUG: gametime_str = {gametime_str} (type: {type(gametime_str)})", flush=True)
@@ -300,7 +279,6 @@ async def send_game_announcement(game_id: int):
     channel = bot.get_channel(announcement_channel_id) or await bot.fetch_channel(announcement_channel_id) 
 
     msg_content = create_game_announcement_msg(game_id)
-    print(f"DEBUG: In send_game_announcement\n{msg_content}")
     
     msg = await channel.send(msg_content)
 
