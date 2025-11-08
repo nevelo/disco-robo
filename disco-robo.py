@@ -300,11 +300,11 @@ async def send_bother_message(game_id: int):
         attendance = get_game_attendance(session, game_id)
         
         # Get discord IDs for pending players
-        pending_players = [p for p in attendance["pending"] if p.discord_username is not None]
+        pending_players = [p for p in attendance["pending"] if p.discord_id is not None]
         if not pending_players:
             return
 
-        mentions = " ".join(f"<@{p.discord_username}>" for p in pending_players)
+        mentions = " ".join(f"<@{p.discord_id}>" for p in pending_players)
         firstnames = ", ".join(p.real_first for p in pending_players)
         
         msg_content = f"""```
@@ -322,8 +322,8 @@ React with {EMOJI_THUMBS_UP} or {EMOJI_THUMBS_DOWN} to update your status!
 {mentions}"""
         msg = await channel.send(msg_content)
         await msg.add_reaction(EMOJI_THUMBS_UP)
-    await msg.add_reaction(EMOJI_THUMBS_DOWN)
-    return msg
+        await msg.add_reaction(EMOJI_THUMBS_DOWN)
+        return msg
 
 async def send_pester_message(game_id: int):
     """Send final warning to pending players"""
@@ -337,11 +337,11 @@ async def send_pester_message(game_id: int):
         attendance = get_game_attendance(session, game_id)
         
         # Get discord IDs for pending players
-        pending_players = [p for p in attendance["pending"] if p.discord_username is not None]
+        pending_players = [p for p in attendance["pending"] if p.discord_id is not None]
         if not pending_players:
             return
 
-        mentions = " ".join(f"<@{p.discord_username}>" for p in pending_players)
+        mentions = " ".join(f"<@{p.discord_id}>" for p in pending_players)
         firstnames = ", ".join(p.real_first for p in pending_players)
         
         msg_content = f"""```
