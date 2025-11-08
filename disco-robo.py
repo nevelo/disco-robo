@@ -215,22 +215,44 @@ def create_game_announcement_msg(
     game_id: int,
 ):
     with SessionLocal() as session:
-        home_id = get_game_data(session, game_id, "hometeam_id")
-        if (home_id == None):
-            raise ValueError(f"Game {game_id} has no hometeam_id")
-        away_id = get_game_data(session, game_id, "awayteam_id")
-        gametime = get_game_data(session, game_id, "gametime")
-        park = get_game_data(session, game_id, "park")
-        field = get_game_data(session, game_id, "field")
-        hometeam = get_team_data(session, home_id, "name")
-        awayteam = get_team_data(session, away_id, "name")
-        away_colour = get_team_data(session, away_id, "away_colour")
-        home_colour = get_team_data(session, home_id, "home_colour")   
-    
-        attendance = get_game_attendance(session, game_id)
-        attending = [f"{p.real_first} {p.real_last}" for p in attendance["attending"]]
-        not_attending = [f"{p.real_first} {p.real_last}" for p in attendance["not_attending"]]
-        pending = [f"{p.real_first} {p.real_last}" for p in attendance["pending"]]
+        try:
+            home_id = get_game_data(session, game_id, "hometeam_id")
+            if (home_id == None):
+                raise ValueError(f"Game {game_id} has no hometeam_id")
+            away_id = get_game_data(session, game_id, "awayteam_id")
+            gametime = get_game_data(session, game_id, "gametime")
+            park = get_game_data(session, game_id, "park")
+            field = get_game_data(session, game_id, "field")
+            hometeam = get_team_data(session, home_id, "name")
+            awayteam = get_team_data(session, away_id, "name")
+            away_colour = get_team_data(session, away_id, "away_colour")
+            home_colour = get_team_data(session, home_id, "home_colour")   
+        
+            print(f"DEBUG: home_id = {home_id} (type: {type(home_id)})", flush=True)
+            print(f"DEBUG: away_id = {away_id} (type: {type(away_id)})", flush=True)
+            print(f"DEBUG: gametime = {gametime} (type: {type(gametime)})", flush=True)
+            print(f"DEBUG: park = {park} (type: {type(park)})", flush=True)
+            print(f"DEBUG: field = {field} (type: {type(field)})", flush=True)
+            print(f"DEBUG: hometeam = {hometeam} (type: {type(hometeam)})", flush=True)
+            print(f"DEBUG: awayteam = {awayteam} (type: {type(awayteam)})", flush=True)
+            print(f"DEBUG: away_colour = {away_colour} (type: {type(away_colour)})", flush=True)
+            print(f"DEBUG: home_colour = {home_colour} (type: {type(home_colour)})", flush=True)
+
+            attendance = get_game_attendance(session, game_id)
+            attending = [f"{p.real_first} {p.real_last}" for p in attendance["attending"]]
+            not_attending = [f"{p.real_first} {p.real_last}" for p in attendance["not_attending"]]
+            pending = [f"{p.real_first} {p.real_last}" for p in attendance["pending"]]
+
+            print(f"DEBUG: attendance keys = {attendance.keys()}", flush=True)
+            print(f"DEBUG: attending = {attending} (type: {type(attending)})", flush=True)
+            print(f"DEBUG: not_attending = {not_attending} (type: {type(not_attending)})", flush=True)
+            print(f"DEBUG: pending = {pending} (type: {type(pending)})", flush=True)
+            
+        except Exception as e:
+            print(f"DEBUG: Error getting game data: {e}", flush=True)
+            import traceback
+            print(f"DEBUG: Traceback:\n{traceback.format_exc()}", flush=True)
+            raise
 
     away_colour_emoji = circles.get(away_colour, CONFUSED_EMOJI)
     home_colour_emoji = circles.get(home_colour, CONFUSED_EMOJI)
@@ -243,7 +265,19 @@ def create_game_announcement_msg(
     not_attending_str = ", ".join(not_attending) if not_attending else "(none)"
     pending_str = ", ".join(pending) if pending else "(none)"
 
-    gametime_str = gametime.strftime('%A, %B %d at %I:%M %p')
+    print(f"DEBUG: away_colour_emoji = {away_colour_emoji} (type: {type(away_colour_emoji)})", flush=True)
+    print(f"DEBUG: home_colour_emoji = {home_colour_emoji} (type: {type(home_colour_emoji)})", flush=True)
+    print(f"DEBUG: attending_str = {attending_str} (type: {type(attending_str)})", flush=True)
+    print(f"DEBUG: not_attending_str = {not_attending_str} (type: {type(not_attending_str)})", flush=True)
+    print(f"DEBUG: pending_str = {pending_str} (type: {type(pending_str)})", flush=True)
+    
+    try:
+        gametime_str = gametime.strftime('%A, %B %d at %I:%M %p')
+        print(f"DEBUG: gametime_str = {gametime_str} (type: {type(gametime_str)})", flush=True)
+    except Exception as e:
+        print(f"DEBUG: Error formatting gametime: {e}", flush=True)
+        print(f"DEBUG: gametime value: {gametime}, type: {type(gametime)}", flush=True)
+        raise
 
     msg_content = f"""```
 {EMOJI_DISC} {EMOJI_DISC} GAME ALERT!! {EMOJI_DISC} {EMOJI_DISC}
@@ -1645,7 +1679,7 @@ async def bot_test_display_game_message(ctx):
                     next_game_id = gid
                     break
 
-            await ctx.send("Found game {next_game_id}")
+            await ctx.send(f"Found game {next_game_id}")
             
             if not next_game_id:
                 await ctx.send("No upcoming games found for tracked teams.")
