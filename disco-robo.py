@@ -257,10 +257,6 @@ def create_game_announcement_msg(
     away_colour_emoji = circles.get(away_colour, CONFUSED_EMOJI)
     home_colour_emoji = circles.get(home_colour, CONFUSED_EMOJI)
 
-    attending = [f"{p.real_first} {p.real_last}" for p in attendance["attending"]]
-    not_attending = [f"{p.real_first} {p.real_last}" for p in attendance["not_attending"]]
-    pending = [f"{p.real_first} {p.real_last}" for p in attendance["pending"]]
-
     attending_str = ", ".join(attending) if attending else "(none)"
     not_attending_str = ", ".join(not_attending) if not_attending else "(none)"
     pending_str = ", ".join(pending) if pending else "(none)"
