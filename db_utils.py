@@ -654,7 +654,7 @@ def get_game_data(
         return None
     
     if param == "datetime":
-        return game.datetime.isoformat()
+        return game.datetime
     elif param == "park":
         return game.park
     elif param == "field":
