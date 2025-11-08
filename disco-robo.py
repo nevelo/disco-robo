@@ -1718,7 +1718,7 @@ async def check_messages():
                             print(f"Sending gameday message for game {game}, flush=True")
                             try:
                                 msg = await send_day_of_game_reminder_message(game)
-                                set_game_message(session, game.id, 'gameday_msg', msg.id)
+                                set_game_message(session, game, 'gameday_msg', msg.id)
                             except Exception as e:
                                 print(f"ERROR: Failed to send gameday message: {e}", flush=True)
                                 import traceback
@@ -1738,7 +1738,7 @@ async def check_messages():
                         try:
                             msg = await send_game_announcement(game)
                             print(f"DEBUG: Announce sent, ID: {msg.id}", flush=True)
-                            set_game_message(session, game.id, 'announcement_msg', msg.id)
+                            set_game_message(session, game, 'announcement_msg', msg.id)
                         except Exception as e:
                             print(f"ERROR: Failed to send announcement message: {e}", flush=True)
                             import traceback
@@ -1755,7 +1755,7 @@ async def check_messages():
                     print(f"Sending bother message for game {game}, flush=True")
                     if not msgs['bother_msg']:
                         msg = await send_bother_message(game)
-                        set_game_message(session, game.id, 'bother_msg', msg.id)
+                        set_game_message(session, game, 'bother_msg', msg.id)
                         await asyncio.sleep(1)  # Rate limit
 
             # Check for games tomorrow that need pester messages
@@ -1767,7 +1767,7 @@ async def check_messages():
                     print(f"Sending pester message for game {game}, flush=True")
                     if not msgs['pester_msg']:
                         msg = await send_pester_message(game)
-                        set_game_message(session, game.id, 'pester_msg', msg.id)
+                        set_game_message(session, game, 'pester_msg', msg.id)
                         await asyncio.sleep(1)  # Rate limit
 
     except Exception as e:
