@@ -211,18 +211,8 @@ circles = {
     "rainbow": "\U0001F308",
 }
 
-
- 
-
-
-
 def create_game_announcement_msg(
     game_id: int,
-    awayteam: str,
-    hometeam: str,
-    gametime: str,
-    park: str,
-    field: int,
 ):
     with SessionLocal() as session:
         home_id = get_game_data(session, game_id, "hometeam_id")
@@ -441,7 +431,7 @@ async def bot_get_schedule(ctx):
                 home_color = circles.get(game.hometeam.home_colour.lower(), CONFUSED_EMOJI)
                 
                 # Format header line (date, time, location)
-                header = f"{date_str}  {time_str}                 {game.park} {game.field}"
+                header = f"[{game.id:3d}]{date_str}  {time_str}           {game.park} {game.field}"
                 lines.append(header)
                 
                 # Format teams line
@@ -1492,6 +1482,176 @@ async def bot_edit_game(ctx, *, args):
 
     except Exception as e:
         await ctx.send(f"Error updating game: {str(e)}")
+
+@bot.command(name="list_teams")
+@log_command()
+async def bot_list_teams(ctx):
+    """Display all teams in the database.
+    Usage: !list_teams
+    
+    Shows all teams with their ID, name, year, and season.
+    """
+    try:
+        with SessionLocal() as session:
+            teams = session.query(Team).order_by(Team.year.desc(), Team.season, Team.name).all()
+            
+            if not teams:
+                await ctx.send("No teams found in the database.")
+                return
+
+            # Build the formatted output
+            lines = []
+            lines.append("ALL TEAMS")
+            lines.append("-" * 60)
+            
+            for team in teams:
+                # Format: ID | Name | Season Year
+                line = f"[{team.id:3d}] {team.name:<30} {team.season} {team.year}"
+                lines.append(line)
+            
+            # Split into multiple messages if needed (Discord has 2000 char limit)
+            output = "```\n" + "\n".join(lines) + "\n```"
+            
+            # Send in chunks if over Discord's limit
+            if len(output) > 1990:  # Leave room for code block markers
+                chunks = []
+                current_chunk = ["```"]
+                current_length = 4  # Length of "```\n"
+                
+                for line in lines:
+                    line_length = len(line) + 1  # +1 for newline
+                    if current_length + line_length > 1990:
+                        current_chunk.append("```")
+                        chunks.append("\n".join(current_chunk))
+                        current_chunk = ["```", line]
+                        current_length = 4 + line_length
+                    else:
+                        current_chunk.append(line)
+                        current_length += line_length
+                
+                current_chunk.append("```")
+                chunks.append("\n".join(current_chunk))
+                
+                for chunk in chunks:
+                    await ctx.send(chunk)
+            else:
+                await ctx.send(output)
+
+    except Exception as e:
+        await ctx.send(f"Error listing teams: {str(e)}")
+        print(f"Error in list_teams command: {e}", flush=True)
+
+@bot.command(name="list_players")
+@log_command()
+async def bot_list_players(ctx):
+    """Display all players in the database.
+    Usage: !list_players
+    
+    Shows all players with their ID, name, Discord username, and gender.
+    """
+    try:
+        with SessionLocal() as session:
+            players = session.query(Player).order_by(Player.real_last, Player.real_first).all()
+            
+            if not players:
+                await ctx.send("No players found in the database.")
+                return
+
+            # Build the formatted output
+            lines = []
+            lines.append("ALL PLAYERS")
+            lines.append("-" * 70)
+            
+            for player in players:
+                # Format gender
+                gender_display = "F" if player.gender == Genders.FEMALE_MATCHING else "O"
+                
+                # Format Discord username (handle None)
+                discord_display = player.discord_username if player.discord_username else "(none)"
+                
+                # Format: [ID] Last, First (Discord) Gender
+                line = f"[{player.id:3d}] {player.real_last:<15} {player.real_first:<15} {discord_display:<20} {gender_display}"
+                lines.append(line)
+            
+            # Split into multiple messages if needed (Discord has 2000 char limit)
+            output = "```\n" + "\n".join(lines) + "\n```"
+            
+            # Send in chunks if over Discord's limit
+            if len(output) > 1990:  # Leave room for code block markers
+                chunks = []
+                current_chunk = ["```"]
+                current_length = 4  # Length of "```\n"
+                
+                for line in lines:
+                    line_length = len(line) + 1  # +1 for newline
+                    if current_length + line_length > 1990:
+                        current_chunk.append("```")
+                        chunks.append("\n".join(current_chunk))
+                        current_chunk = ["```", line]
+                        current_length = 4 + line_length
+                    else:
+                        current_chunk.append(line)
+                        current_length += line_length
+                
+                current_chunk.append("```")
+                chunks.append("\n".join(current_chunk))
+                
+                for chunk in chunks:
+                    await ctx.send(chunk)
+            else:
+                await ctx.send(output)
+
+    except Exception as e:
+        await ctx.send(f"Error listing players: {str(e)}")
+        print(f"Error in list_players command: {e}", flush=True)
+
+@bot.command(name="test_display_game_message")
+@log_command()
+@is_privileged()
+async def bot_test_display_game_message(ctx):
+    """Test display of the next game announcement message without saving.
+    Usage: !test_display_game_message
+    
+    This will show what the game announcement will look like for the next
+    scheduled game, but won't save the message ID to the database.
+    """
+    try:
+        tracked_teams = get_tracked_teams()
+        if not tracked_teams:
+            await ctx.send("No teams are currently being tracked. Add team IDs to config/config.json")
+            return
+
+        with SessionLocal() as session:
+            # Get the very next game regardless of time
+            now = datetime.now()
+            far_future = now + timedelta(days=3650)  # 10 years should be enough
+            game_ids = get_upcoming_games(session, now, far_future)
+            
+            if not game_ids:
+                await ctx.send("No upcoming games found.")
+                return
+            
+            # Filter for tracked teams
+            next_game_id = None
+            for gid in game_ids:
+                game = get_game_object(session, gid)
+                if game and (game.hometeam_id in tracked_teams or game.awayteam_id in tracked_teams):
+                    next_game_id = gid
+                    break
+            
+            if not next_game_id:
+                await ctx.send("No upcoming games found for tracked teams.")
+                return
+            
+            # Create the message content
+            msg_content = create_game_announcement_msg(next_game_id)
+            
+            # Send the test message (this doesn't save the message ID)
+            await ctx.send(msg_content)
+            
+    except Exception as e:
+        await ctx.send(f"Error displaying test message: {str(e)}")
+        print(f"Error in test_display_game_message: {e}", flush=True)
 
 ## --- Tasks and Event Handlers --- 
 
