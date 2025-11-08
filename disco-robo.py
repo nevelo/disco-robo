@@ -1891,7 +1891,7 @@ def verify_db_connection():
 
 if __name__ == "__main__":
     try:
-        config = load_config()
+        config = read_config()
         DISCORD_TOKEN = config.get("discord_token", None)
         if (DISCORD_TOKEN is None) or (DISCORD_TOKEN == ""):
             print("Error: Discord token not found in config.json", flush=True)
