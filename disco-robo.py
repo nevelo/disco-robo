@@ -250,7 +250,7 @@ def create_game_announcement_msg(
 
 {away_colour_emoji} {awayteam} vs {home_colour_emoji} {hometeam}
 
-{EMOJI_CLOCK} {gametime}
+{EMOJI_CLOCK} {gametime_str}
 {EMOJI_MAP} {park}, Field {field}
 
 {EMOJI_GREEN_CHECK} {attending_str}
@@ -1636,8 +1636,6 @@ async def bot_test_display_game_message(ctx):
             if not game_ids:
                 await ctx.send("No upcoming games found.")
                 return
-            
-            await ctx.send("Found ")
 
             # Filter for tracked teams
             next_game_id = None
@@ -1646,6 +1644,8 @@ async def bot_test_display_game_message(ctx):
                 if game and (game.hometeam_id in tracked_teams or game.awayteam_id in tracked_teams):
                     next_game_id = gid
                     break
+
+            await ctx.send("Found game {next_game_id}")
             
             if not next_game_id:
                 await ctx.send("No upcoming games found for tracked teams.")
