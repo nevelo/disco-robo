@@ -300,6 +300,7 @@ async def send_game_announcement(game_id: int):
     channel = bot.get_channel(announcement_channel_id) or await bot.fetch_channel(announcement_channel_id) 
 
     msg_content = create_game_announcement_msg(game_id)
+    print(f"DEBUG: In send_game_announcement\n{msg_content}")
     
     msg = await channel.send(msg_content)
 
