@@ -219,7 +219,7 @@ def create_game_announcement_msg(
         if (home_id == None):
             raise ValueError(f"Game {game_id} has no hometeam_id")
         away_id = get_game_data(session, game_id, "awayteam_id")
-        gametime = get_game_data(session, game_id, "gametime") # FIX:: Game time is stored as a DateTime not a string
+        gametime = get_game_data(session, game_id, "gametime")
         park = get_game_data(session, game_id, "park")
         field = get_game_data(session, game_id, "field")
         hometeam = get_team_data(session, home_id, "name")
@@ -239,6 +239,12 @@ def create_game_announcement_msg(
     not_attending = [f"{p.real_first} {p.real_last}" for p in attendance["not_attending"]]
     pending = [f"{p.real_first} {p.real_last}" for p in attendance["pending"]]
 
+    attending_str = ", ".join(attending) if attending else "(none)"
+    not_attending_str = ", ".join(not_attending) if not_attending else "(none)"
+    pending_str = ", ".join(pending) if pending else "(none)"
+
+    gametime_str = gametime.strftime('%A, %B %d at %I:%M %p')
+
     msg_content = f"""```
 {EMOJI_DISC} {EMOJI_DISC} GAME ALERT!! {EMOJI_DISC} {EMOJI_DISC}
 
@@ -247,9 +253,9 @@ def create_game_announcement_msg(
 {EMOJI_CLOCK} {gametime}
 {EMOJI_MAP} {park}, Field {field}
 
-{EMOJI_GREEN_CHECK} {attending}
-{EMOJI_RED_X} {not_attending}
-{EMOJI_HOURGLASS} {pending}
+{EMOJI_GREEN_CHECK} {attending_str}
+{EMOJI_RED_X} {not_attending_str}
+{EMOJI_HOURGLASS} {pending_str}
 
 React with {EMOJI_THUMBS_UP} or {EMOJI_THUMBS_DOWN} to update your status!
 ```"""
@@ -1631,6 +1637,8 @@ async def bot_test_display_game_message(ctx):
                 await ctx.send("No upcoming games found.")
                 return
             
+            await ctx.send("Found ")
+
             # Filter for tracked teams
             next_game_id = None
             for gid in game_ids:
