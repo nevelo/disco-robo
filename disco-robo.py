@@ -220,7 +220,7 @@ def create_game_announcement_msg(
             if (home_id == None):
                 raise ValueError(f"Game {game_id} has no hometeam_id")
             away_id = get_game_data(session, game_id, "awayteam_id")
-            gametime = get_game_data(session, game_id, "gametime")
+            gametime = get_game_data(session, game_id, "datetime")
             park = get_game_data(session, game_id, "park")
             field = get_game_data(session, game_id, "field")
             hometeam = get_team_data(session, home_id, "name")
