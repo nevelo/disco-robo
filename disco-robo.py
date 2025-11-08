@@ -1670,6 +1670,83 @@ async def bot_test_display_game_message(ctx):
         await ctx.send(f"Error displaying test message: {str(e)}")
         print(f"Error in test_display_game_message: {e}", flush=True)
 
+@bot.command(name="set_message_id")
+@log_command()
+@is_privileged()
+async def bot_set_message_id(ctx, *, args):
+    """Set or clear a message ID for a game.
+    Usage: !set_message_id game=<game_id> type=<message_type> id=<message_id|None>
+    
+    Arguments:
+    - game: Game ID (required)
+    - type: Message type (required): 1=announcement, 2=bother, 3=pester, 4=gameday
+    - id: Discord message ID or "None" to clear (required)
+    
+    Example: !set_message_id game=123 type=1 id=987654321
+    Example: !set_message_id game=123 type=2 id=None
+    """
+    try:
+        params = parse_args(args)
+        game_id = int(params.get('game', 0))
+        msg_type = int(params.get('type', 0))
+        msg_id = params.get('id', '').strip('"')
+        
+        if not game_id:
+            raise ValueError("Game ID is required")
+        if not msg_type or msg_type not in [1, 2, 3, 4]:
+            raise ValueError("Message type must be 1 (announcement), 2 (bother), 3 (pester), or 4 (gameday)")
+        if not msg_id:
+            raise ValueError("Message ID is required (use 'None' to clear)")
+        
+        # Map type numbers to field names
+        type_map = {
+            1: ('announcement_msg', 'announcement'),
+            2: ('bother_msg', 'bother'),
+            3: ('pester_msg', 'pester'),
+            4: ('gameday_msg', 'gameday reminder')
+        }
+        
+        field_name, display_name = type_map[msg_type]
+        
+        # Handle "None" to clear the message ID
+        if msg_id.lower() == 'none':
+            msg_id_value = None
+            action = "cleared"
+        else:
+            # Validate that it's a valid Discord message ID (numeric)
+            try:
+                int(msg_id)  # Just validate, keep as string for storage
+                msg_id_value = msg_id
+                action = "set"
+            except ValueError:
+                raise ValueError(f"Invalid message ID: {msg_id}. Must be numeric or 'None'")
+        
+        with SessionLocal() as session:
+            game = get_game_object(session, game_id)
+            if not game:
+                raise ValueError(f"Game {game_id} not found")
+            
+            # Set the message ID
+            setattr(game, field_name, msg_id_value)
+            session.commit()
+            
+            # Get game details for confirmation
+            game_date = game.datetime.strftime("%Y-%m-%d %H:%M")
+            away_team = get_team_data(session, game.awayteam_id, param='name')
+            home_team = get_team_data(session, game.hometeam_id, param='name')
+            
+            await ctx.send(
+                f"✅ {display_name.capitalize()} message ID {action} for game {game_id}\n"
+                f"Game: {away_team} @ {home_team} on {game_date}\n"
+                f"Message ID: {msg_id_value if msg_id_value else '(cleared)'}"
+            )
+
+    except ValueError as ve:
+        await ctx.send(f"Error: {str(ve)}")
+    except Exception as e:
+        await ctx.send(f"An unexpected error occurred: {str(e)}")
+        print(f"Error in set_message_id: {e}", flush=True)
+
 ## --- Tasks and Event Handlers --- 
 
 @tasks.loop(minutes=5)
