@@ -1724,6 +1724,7 @@ async def check_messages():
         return
         
     try:
+        print("DEBUG: Starting check_messages task", flush=True)
         with SessionLocal() as session:
             tz = pytz.timezone(TIMEZONE)
             now = datetime.now(tz)
@@ -1736,8 +1737,15 @@ async def check_messages():
                     for game in today_games:
                         msgs = get_game_messages(session, game)
                         if not msgs['gameday_msg']:
-                            msg = await send_day_of_game_reminder_message(game)
-                            set_game_message(session, game.id, 'gameday_msg', msg.id)
+                            print(f"Sending gameday message for game {game}, flush=True")
+                            try:
+                                msg = await send_day_of_game_reminder_message(game)
+                                set_game_message(session, game.id, 'gameday_msg', msg.id)
+                            except Exception as e:
+                                print(f"ERROR: Failed to send gameday message: {e}", flush=True)
+                                import traceback
+                                print(f"Traceback:\n{traceback.format_exc()}", flush=True)
+                                raise
                             await asyncio.sleep(1)  # Rate limit
 
             # Check for upcoming games in next 3 days
@@ -1746,9 +1754,18 @@ async def check_messages():
             if upcoming_games:
                 for game in upcoming_games:
                     msgs = get_game_messages(session, game)
+                    print(f"Checking annoouncement for game {game}", flush=True)
                     if not msgs['announcement_msg']:
-                        msg = await send_game_announcement(game)
-                        set_game_message(session, game.id, 'announcement_msg', msg.id)
+                        print(f"Sending announcement message for game {game}, flush=True")
+                        try:
+                            msg = await send_game_announcement(game)
+                            print(f"DEBUG: Announce sent, ID: {msg.id}", flush=True)
+                            set_game_message(session, game.id, 'announcement_msg', msg.id)
+                        except Exception as e:
+                            print(f"ERROR: Failed to send announcement message: {e}", flush=True)
+                            import traceback
+                            print(f"Traceback:\n{traceback.format_exc()}", flush=True)
+                            raise
                         await asyncio.sleep(1)  # Rate limit
 
             # Check for games in 2 days that need bother messages
@@ -1757,6 +1774,7 @@ async def check_messages():
             if bother_games:
                 for game in bother_games:
                     msgs = get_game_messages(session, game)
+                    print(f"Sending bother message for game {game}, flush=True")
                     if not msgs['bother_msg']:
                         msg = await send_bother_message(game)
                         set_game_message(session, game.id, 'bother_msg', msg.id)
@@ -1768,6 +1786,7 @@ async def check_messages():
             if pester_games:
                 for game in pester_games:
                     msgs = get_game_messages(session, game)
+                    print(f"Sending pester message for game {game}, flush=True")
                     if not msgs['pester_msg']:
                         msg = await send_pester_message(game)
                         set_game_message(session, game.id, 'pester_msg', msg.id)
