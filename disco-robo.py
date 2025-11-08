@@ -305,11 +305,12 @@ async def send_bother_message(game_id: int):
             return
 
         mentions = " ".join(f"<@{p.discord_username}>" for p in pending_players)
+        firstnames = ", ".join(p.real_first for p in pending_players)
         
         msg_content = f"""```
 {EMOJI_BELL} ATTENDANCE REMINDER {EMOJI_BELL}
 
-Hey {mentions}!
+Hey {firstnames}!
 Still waiting on your response for:
 
 {game.awayteam.name} @ {game.hometeam.name}
@@ -317,7 +318,8 @@ Still waiting on your response for:
 {game.park}, Field {game.field}
 
 React with {EMOJI_THUMBS_UP} or {EMOJI_THUMBS_DOWN} to update your status!
-```"""
+```
+{mentions}"""
         msg = await channel.send(msg_content)
         await msg.add_reaction(EMOJI_THUMBS_UP)
     await msg.add_reaction(EMOJI_THUMBS_DOWN)
@@ -340,11 +342,12 @@ async def send_pester_message(game_id: int):
             return
 
         mentions = " ".join(f"<@{p.discord_username}>" for p in pending_players)
+        firstnames = ", ".join(p.real_first for p in pending_players)
         
         msg_content = f"""```
 {EMOJI_WARNING} URGENT ATTENDANCE CHECK {EMOJI_WARNING}
 
-Hey {mentions}!
+Hey {firstnames}!
 Do we need to find a sub??? Game is TOMORROW:
 
 {game.awayteam.name} @ {game.hometeam.name}
@@ -352,7 +355,8 @@ Do we need to find a sub??? Game is TOMORROW:
 {game.park}, Field {game.field}
 
 Please react with {EMOJI_THUMBS_UP} or {EMOJI_THUMBS_DOWN} ASAP!
-```"""
+```
+{mentions}"""
         msg = await channel.send(msg_content)
         await msg.add_reaction(EMOJI_THUMBS_UP)
         await msg.add_reaction(EMOJI_THUMBS_DOWN)
