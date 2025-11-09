@@ -211,6 +211,55 @@ circles = {
     "rainbow": "\U0001F308",
 }
 
+def create_game_day_msg(
+    game_id: int,
+) -> str:
+    """Create the day-of-game reminder message content.
+    
+    Args:
+        game_id: The ID of the game
+        
+    Returns:
+        The formatted message content string
+    """
+    with SessionLocal() as session:
+        game = get_game_object(session, game_id)
+        if not game:
+            raise ValueError(f"No game found with game ID {game_id}")
+        
+        attendance = get_game_attendance(session, game_id)
+        attending = [f"{p.real_first} {p.real_last}" for p in attendance["attending"]]
+        not_attending = [f"{p.real_first} {p.real_last}" for p in attendance["not_attending"]]
+        pending = [f"{p.real_first} {p.real_last}" for p in attendance["pending"]]
+
+        # Get team colors
+        away_colour = game.awayteam.away_colour
+        home_colour = game.hometeam.home_colour
+        team_colour_emoji = circles.get(away_colour, CONFUSED_EMOJI)
+        opp_colour_emoji = circles.get(home_colour, CONFUSED_EMOJI)
+
+        attending_str = ", ".join(attending) if attending else "(none)"
+        not_attending_str = ", ".join(not_attending) if not_attending else "(none)"
+        pending_str = ", ".join(pending) if pending else "(none)"
+
+        msg_content = f"""```
+{EMOJI_SIREN} {EMOJI_DISC} GAME TODAY!! {EMOJI_DISC} {EMOJI_SIREN}
+    
+{team_colour_emoji} {game.awayteam.name} vs {opp_colour_emoji} {game.hometeam.name}
+
+{EMOJI_CLOCK} {game.datetime.strftime('%I:%M %p')} TODAY!
+{EMOJI_MAP} {game.park}, Field {game.field}
+
+Current Lineup:
+{EMOJI_GREEN_CHECK} {attending_str}
+{EMOJI_RED_X} {not_attending_str}
+{CONFUSED_EMOJI} {pending_str}
+
+Last chance to update your status!
+React with {EMOJI_THUMBS_UP} or {EMOJI_THUMBS_DOWN}
+```"""
+        return msg_content
+
 def create_game_announcement_msg(
     game_id: int,
 ):
@@ -369,42 +418,12 @@ async def send_day_of_game_reminder_message(game_id: int):
         raise ValueError("Announcement channel not configured in config.json")
     channel = bot.get_channel(announcement_channel_id) or await bot.fetch_channel(announcement_channel_id) 
 
-    with SessionLocal() as session:
-        game = get_game_object(session, game_id)
-        if not game:
-            raise ValueError(f"No game found with ID {game_id}")
-        
-        attendance = get_game_attendance(session, game_id)
-        attending = [f"{p.real_first} {p.real_last}" for p in attendance["attending"]]
-        not_attending = [f"{p.real_first} {p.real_last}" for p in attendance["not_attending"]]
-        pending = [f"{p.real_first} {p.real_last}" for p in attendance["pending"]]
+    msg_content = create_game_day_msg(game_id)
 
-        # Get team colors
-        away_colour = game.awayteam.away_colour
-        home_colour = game.hometeam.home_colour
-        team_colour_emoji = circles.get(away_colour, CONFUSED_EMOJI)
-        opp_colour_emoji = circles.get(home_colour, CONFUSED_EMOJI)
-        
-        msg_content = f"""```
-{EMOJI_SIREN} {EMOJI_DISC} GAME TODAY!! {EMOJI_DISC} {EMOJI_SIREN}
-    
-{team_colour_emoji} {game.awayteam.name} vs {opp_colour_emoji} {game.hometeam.name}
-
-{EMOJI_CLOCK} {game.datetime.strftime('%I:%M %p')} TODAY!
-{EMOJI_MAP} {game.park}, Field {game.field}
-
-Current Lineup:
-{EMOJI_GREEN_CHECK} {attending}
-{EMOJI_RED_X} {not_attending}
-{EMOJI_HOURGLASS} {pending}
-
-Last chance to update your status!
-React with {EMOJI_THUMBS_UP} or {EMOJI_THUMBS_DOWN}
-```"""
-        msg = await channel.send(msg_content)
-        await msg.add_reaction(EMOJI_THUMBS_UP)
-        await msg.add_reaction(EMOJI_THUMBS_DOWN)
-        return msg
+    msg = await channel.send(msg_content)
+    await msg.add_reaction(EMOJI_THUMBS_UP)
+    await msg.add_reaction(EMOJI_THUMBS_DOWN)
+    return msg
 
 
 
@@ -1935,14 +1954,31 @@ async def on_raw_reaction_add(payload):
             # Update message with new attendance
             msgs = get_game_messages(session, game_id)
             announcement_msg_id = msgs.get('announcement_msg')
+            gameday_msg_id = msgs.get('gameday_msg')
 
             if not announcement_msg_id:
                 return
             
-            updated_msg_content = create_game_announcement_msg(game_id)
             announcement_channel = bot.get_channel(CHANNELS["announcements"]) or await bot.fetch_channel(CHANNELS["announcements"])
-            announcement_msg = await announcement_channel.fetch_message(announcement_msg_id)
-            await announcement_msg.edit(content=updated_msg_content)
+
+            try:
+                updated_msg_content = create_game_announcement_msg(game_id)
+                announcement_msg = await announcement_channel.fetch_message(announcement_msg_id)
+                await announcement_msg.edit(content=updated_msg_content)
+            except NotFound:
+                print(f"Warning: announcement message {announcement_msg_id} not found for game {game_id}", flush=True)
+            except Exception as e:
+                print(f"Error updating announcement message: {e}", flush=True)
+
+            if gameday_msg_id:
+                try:
+                    updated_gameday_msg = create_game_day_msg(game_id)
+                    gameday_msg = await announcement_channel.fetch_message(gameday_msg_id)
+                    await gameday_msg.edit(content=updated_gameday_msg)
+                except NotFound:
+                    print(f"Warning: Gameday message {gameday_msg_id} not found for game {game_id}", flush=True)    
+                except Exception as e:
+                    print(f"Error updating gameday message: {e}", flush=True)
 
     except Exception as e:
         print(f"Error handling reaction: {e}", flush=True)
