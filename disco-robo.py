@@ -475,7 +475,7 @@ async def bot_get_schedule(ctx):
                 park_str = game.park[:15]
                 field_str = str(game.field)
                 location = f"{park_str} {field_str}"
-                game_id_str = str(game.id)
+                game_id_str = f"[{str(game.id)}]"
                 spacing_needed = 25 - len(location) - len(game_id_str)
 
                 header = f"{date_str} {time_str}            {location}{' ' * spacing_needed}{game_id_str}"
@@ -486,7 +486,7 @@ async def bot_get_schedule(ctx):
                 home_name = game.hometeam.name[:20]  # Limit team name length
                 
                 # Construct team line with consistent vs positioning
-                team_line = f"{away_color}{THIN_SPACE}{away_name:<20} vs  {home_color}{THIN_SPACE}{home_name}"
+                team_line = f"{away_color}{THIN_SPACE}{away_name:<20} vs {home_color}{THIN_SPACE}{home_name}"
                 lines.append(team_line)
                 lines.append("")  # Add blank line between games
             
