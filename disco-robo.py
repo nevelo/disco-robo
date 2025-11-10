@@ -1835,9 +1835,11 @@ async def check_messages():
                                 raise
                             await asyncio.sleep(1)  # Rate limit
 
-            # Check for upcoming games in next 3 days
             three_days_future = now + timedelta(days=3)
-            upcoming_games = get_upcoming_games(session, now, three_days_future)
+            two_days_future = now + timedelta(days=2)
+            tomorrow = now + timedelta(days=1)
+            # Check for upcoming games in next 2 days
+            upcoming_games = get_upcoming_games(session, now, two_days_future)
             if upcoming_games:
                 for game in upcoming_games:
                     msgs = get_game_messages(session, game)
@@ -1855,9 +1857,8 @@ async def check_messages():
                             raise
                         await asyncio.sleep(1)  # Rate limit
 
-            # Check for games in 2 days that need bother messages
-            two_days_future = now + timedelta(days=2)
-            bother_games = get_upcoming_games(session, now, two_days_future)
+            # Check for games in 1 days that need bother messages
+            bother_games = get_upcoming_games(session, now, tomorrow)
             if bother_games:
                 for game in bother_games:
                     msgs = get_game_messages(session, game)
@@ -1868,16 +1869,15 @@ async def check_messages():
                         await asyncio.sleep(1)  # Rate limit
 
             # Check for games tomorrow that need pester messages
-            tomorrow = now + timedelta(days=1)
-            pester_games = get_upcoming_games(session, now, tomorrow)
-            if pester_games:
-                for game in pester_games:
-                    msgs = get_game_messages(session, game)
-                    print(f"Sending pester message for game {game}, flush=True")
-                    if not msgs['pester_msg']:
-                        msg = await send_pester_message(game)
-                        set_game_message(session, game, 'pester_msg', msg.id)
-                        await asyncio.sleep(1)  # Rate limit
+#            pester_games = get_upcoming_games(session, now, tomorrow)
+#            if pester_games:
+#                for game in pester_games:
+#                    msgs = get_game_messages(session, game)
+#                    print(f"Sending pester message for game {game}, flush=True")
+#                    if not msgs['pester_msg']:
+#                        msg = await send_pester_message(game)
+#                        set_game_message(session, game, 'pester_msg', msg.id)
+#                        await asyncio.sleep(1)  # Rate limit
 
     except Exception as e:
         print(f"Error in check_messages: {e}", flush=True)
