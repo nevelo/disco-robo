@@ -496,7 +496,7 @@ async def bot_get_schedule(ctx):
         await ctx.send(f"Error displaying schedule: {str(e)}")
         print(f"Error in schedule command: {e}", flush=True)
 
-@bot.command(name="set_attendance")
+@bot.command(name="set_attendance", aliases=["sta", "seta"])
 @log_command()
 @is_privileged()
 async def bot_set_attendance_status(ctx, *, args):
@@ -504,21 +504,21 @@ async def bot_set_attendance_status(ctx, *, args):
     Usage: !set_attendance game=123 player=456 status=(yes|no|pending)
     
     Arguments:
-    - game: Game ID (required)
-    - player: Player ID (required)
-    - status: Attendance status (required)
-      - yes: Will attend
-      - no: Will not attend
-      - pending: Status not yet determined
+    - game/g: Game ID (required)
+    - player/p: Player ID (required)
+    - status/s: Attendance status (required)
+      - yes/y: Will attend
+      - no/n: Will not attend
+      - pending/p: Status not yet determined
     """
     try:
         # Parse arguments
         params = parse_args(args)
         
         # Extract and validate required parameters
-        game_id = int(params.get('game', 0))
-        player_id = int(params.get('player', 0))
-        status_str = params.get('status', '').lower()
+        game_id = int(params.get('game', params.get('g', 0)))
+        player_id = int(params.get('player', params.get('p', 0)))
+        status_str = params.get('status', params.get('s', '')).lower()
         
         # Validate required fields
         if not game_id:
@@ -526,19 +526,31 @@ async def bot_set_attendance_status(ctx, *, args):
         if not player_id:
             raise ValueError("Player ID is required")
         if not status_str:
-            raise ValueError("Status is required (yes, no, or pending)")
+            raise ValueError("Status is required (yes/y, no/n, or pending/p)")
             
         # Convert status string to enum
         status_map = {
             'yes': AttendanceStatus.ATTENDING,
+            'y': AttendanceStatus.ATTENDING,
             'no': AttendanceStatus.NOT_ATTENDING,
-            'pending': AttendanceStatus.PENDING
+            'n': AttendanceStatus.NOT_ATTENDING,
+            'pending': AttendanceStatus.PENDING,
+            'p': AttendanceStatus.PENDING
         }
         status = status_map.get(status_str)
         if not status:
-            raise ValueError("Status must be 'yes', 'no', or 'pending'")
+            raise ValueError("Status must be 'yes'/'y', 'no'/'n', or 'pending'/'p")
         
         with SessionLocal() as session:
+            # Get player and game info for display
+            player = get_player_object(session, player_id)
+            if not player:
+                raise ValueError(f"Player {player_id} not found.")
+            
+            game = get_game_object(session, game_id)
+            if not game:
+                raise ValueError(f"Game {game_id} not found.")
+
             # Set attendance status
             attendance = set_attendance_status(
                 session=session,
@@ -554,9 +566,12 @@ async def bot_set_attendance_status(ctx, *, args):
                 AttendanceStatus.PENDING: CONFUSED_EMOJI
             }
             emoji = status_emoji[attendance.status]
+
+            player_name = f"{player.real_first} {player.real_last}"
+            game_datetime = game.datetime.strftime('%A, %B %d %I:%M %p')
             
             await ctx.send(
-                f"{emoji} Attendance status set for Player {player_id} in Game {game_id}"
+                f"{emoji} Attendance status set for Player {player_name} for Game on {game_datetime}"
             )
 
     except ValueError as ve:
