@@ -471,14 +471,14 @@ async def bot_get_schedule(ctx):
                     time_str = f"{hour_str}:{minute}a"
                 else:
                     time_str = f"{hour_str}:{minute}p"
-                location = f"{game.park} {game.field}"
+
                 park_str = game.park[:15]
                 field_str = str(game.field)
                 location = f"{park_str} {field_str}"
                 game_id_str = str(game.id)
                 spacing_needed = 25 - len(location) - len(game_id_str)
 
-                header = f"{date_str} {time_str}             {location}{' ' * spacing_needed}{game_id_str}"
+                header = f"{date_str} {time_str}            {location}{' ' * spacing_needed}{game_id_str}"
                 lines.append(header)
                 
                 # Format teams line
