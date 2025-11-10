@@ -428,7 +428,7 @@ async def send_day_of_game_reminder_message(game_id: int):
 
 
 # Commands for interfacing with database.
-@bot.command(name="schedule")
+@bot.command(name="schedule", aliases=["sched"])
 @log_command()
 async def bot_get_schedule(ctx):
     """Display upcoming games in a formatted table."""
@@ -455,6 +455,10 @@ async def bot_get_schedule(ctx):
             lines.append("-" * 45)  # Horizontal line
 
             for game in upcoming_games:
+                away_color = circles.get(game.awayteam.away_colour.lower(), CONFUSED_EMOJI)
+                home_color = circles.get(game.hometeam.home_colour.lower(), CONFUSED_EMOJI)
+                
+                # Format header line (date, time, location)
                 date_str = game.datetime.strftime("%b %d")
                 if (date_str[4] == "0"):
                     date_str = date_str[:4] + ' ' + date_str[5:]  # Remove leading zero from day
@@ -463,13 +467,18 @@ async def bot_get_schedule(ctx):
                     hour_str = ' ' + hour_str[1:]  # Remove leading zero from hour
                 minute = game.datetime.strftime("%M")
                 ampm = game.datetime.strftime("%p").lower()
-                time_str = f"{hour_str}:{minute}{ampm}"
+                if ampm == 'am':
+                    time_str = f"{hour_str}:{minute}a"
+                else:
+                    time_str = f"{hour_str}:{minute}p"
+                location = f"{game.park} {game.field}"
+                park_str = game.park[:15]
+                field_str = str(game.field)
+                location = f"{park_str} {field_str}"
+                game_id_str = str(game.id)
+                spacing_needed = 25 - len(location) - len(game_id_str)
 
-                away_color = circles.get(game.awayteam.away_colour.lower(), CONFUSED_EMOJI)
-                home_color = circles.get(game.hometeam.home_colour.lower(), CONFUSED_EMOJI)
-                
-                # Format header line (date, time, location)
-                header = f"[{game.id:3d}]{date_str}  {time_str}           {game.park} {game.field}"
+                header = f"{date_str} {time_str}             {location}{' ' * spacing_needed}{game_id_str}"
                 lines.append(header)
                 
                 # Format teams line
