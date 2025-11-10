@@ -210,3 +210,7 @@ __marimo__/
 config/
 !config/.config
 db/
+
+# Bot-specific files
+log.file
+bot.pid
