@@ -1505,41 +1505,30 @@ async def bot_edit_game(ctx, *, args):
 # EDIT GAME
 #
 # Purpose:  Edit a game's information.
-# Syntax:   !edit_game game_id=ID field_name="field_value"
-# INPUTS:   Name        game_id         Required field name for game ID. Always "game_id"
-#           Integer     ID              Game's unique integer ID.
-#           Name        field_name      Name of the field to edit.
-#                                       Valid options include "datetime", "park", "field", "team1_id", "team2_id".
-#           String/Int  field_value     New value for the specified field.
+# Syntax:   !edit_game id=ID away=TEAM_ID home=TEAM_ID datetime="YYYY-MM-DD HH:MM" park="Park Name" field=NUM
+# INPUTS:   Name        id              Required. Game's unique integer ID.
+#           Integer     away            Optional. Away team ID.
+#           Integer     home            Optional. Home team ID.
+#           String      datetime        Optional. Game date/time in "YYYY-MM-DD HH:MM" format.
+#           String      park            Optional. Park/venue name.
+#           Integer     field           Optional. Field number.
 # --------------------------------------
-    """Edit a game's information. Usage: !edit_game id=123 field_name="new_value" """
+    """Edit a game's information. Usage: !edit_game id=<id> away=<team id> home=<team id>"""
     try:
         params = parse_args(args)
         game_id = int(params.get('id', 0))
-        
+
         if not game_id:
             raise ValueError("Game ID is required")
 
-        # Remove id from params to process remaining fields
-        del params['id']
+        away = int(params['away']) if 'away' in params else None
+        home = int(params['home']) if 'home' in params else None
+        game_datetime = datetime.strptime(params['datetime'].strip('"'), "%Y-%m-%d %H:%M") if 'datetime' in params else None
+        park = params.get('park', '').strip('"') or None
+        field = int(params['field']) if 'field' in params else None
 
         with SessionLocal() as session:
-            game = get_game_object(session, game_id)
-            if not game:
-                raise ValueError(f"Game {game_id} not found")
-
-            # Update each provided field
-            for field, value in params.items():
-                value = value.strip('"')
-                if hasattr(game, field):
-                    # Special handling for datetime field
-                    if field == 'datetime':
-                        value = datetime.strptime(value, "%Y-%m-%d %H:%M")
-                    setattr(game, field, value)
-                else:
-                    await ctx.send(f"Warning: Field '{field}' does not exist and was skipped")
-
-            session.commit()
+            game = edit_game(session, game_id, away=away, home=home, game_datetime=game_datetime, park=park, field=field)
             await ctx.send(f"Game {game_id} updated successfully")
 
     except Exception as e:

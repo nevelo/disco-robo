@@ -315,23 +315,63 @@ def create_game(
 
 def edit_game(
     session: Session,
-    awayteam_id: Optional[int] = None,
-    hometeam_id: Optional[int] = None,
-    datetime: Optional[datetime] = None,
+    game_id: int,
+    away: Optional[int] = None,
+    home: Optional[int] = None,
+    game_datetime: Optional[datetime] = None,
     park: Optional[str] = None,
     field: Optional[int] = None
-) -> Optional[Game]:
-    if awayteam_id is not None:
-        pass  # Implementation goes here
-    if hometeam_id is not None:
-        pass  # Implementation goes here
-    if datetime is not None:
-        pass  # Implementation goes here
+) -> Game:
+    """Edit a game's information.
+
+    Args:
+        session: SQLAlchemy session
+        game_id: ID of the game to edit
+        away: New away team ID
+        home: New home team ID
+        game_datetime: New date/time for the game
+        park: New park/venue name
+        field: New field number
+
+    Returns:
+        The updated Game object
+
+    Raises:
+        ValueError: If the game or referenced teams don't exist,
+                    or if no fields are provided to update.
+    """
+    game = session.query(Game).filter_by(id=game_id).first()
+    if not game:
+        raise ValueError(f"Game with ID {game_id} not found")
+
+    if all(v is None for v in [away, home, game_datetime, park, field]):
+        raise ValueError("No fields provided to update")
+
+    if away is not None:
+        team = session.query(Team).filter_by(id=away).first()
+        if not team:
+            raise ValueError(f"Away team with ID {away} not found")
+        game.awayteam_id = away
+
+    if home is not None:
+        team = session.query(Team).filter_by(id=home).first()
+        if not team:
+            raise ValueError(f"Home team with ID {home} not found")
+        game.hometeam_id = home
+
+    if game_datetime is not None:
+        if not isinstance(game_datetime, datetime):
+            raise ValueError("game_datetime must be a datetime object")
+        game.datetime = game_datetime
+
     if park is not None:
-        pass  # Implementation goes here
+        game.park = park
+
     if field is not None:
-        pass  # Implementation goes here
-    return None
+        game.field = field
+
+    session.commit()
+    return game
 
 def set_attendance_status(
     session: Session,

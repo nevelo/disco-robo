@@ -121,11 +121,13 @@ class MockBot:
             return self._users[user_id]
         raise NotFound("User not found")
 
-    def command(self, name=None):
-        """Simulates the @bot.command() decorator with optional name argument"""
+    def command(self, name=None, **kwargs):
+        """Simulates the @bot.command() decorator with optional name and aliases"""
         def decorator(func):
             cmd_name = name or func.__name__
             self.commands[cmd_name] = func
+            for alias in kwargs.get('aliases', []):
+                self.commands[alias] = func
             return func
         return decorator
 
@@ -263,22 +265,6 @@ class TestDiscordCommands(unittest.TestCase):
             self.ctx.guild.members[username] = member
             self.bot._users[user_id] = member
 
-        # Set up the date mock BEFORE loading the module
-        mock_date = datetime(2025, 10, 1)
-        
-        # Create a real datetime subclass that overrides now() but still passes isinstance checks
-        class MockDatetime(datetime):
-            @classmethod
-            def now(cls, tz=None):
-                return mock_date.replace(tzinfo=tz) if tz else mock_date
-        
-        # Store MockDatetime for use in other patches
-        self.MockDatetime = MockDatetime
-        
-        # Patch datetime in the datetime module BEFORE importing disco-robo
-        self.datetime_patch = patch('datetime.datetime', MockDatetime)
-        self.datetime_patch.start()
-        
         # Import disco-robo with our mock bot
         loader = importlib.machinery.SourceFileLoader("disco_robo", "disco-robo.py")
         spec = importlib.util.spec_from_file_location("disco_robo", "disco-robo.py", loader=loader)
@@ -288,79 +274,16 @@ class TestDiscordCommands(unittest.TestCase):
         with patch('discord.ext.commands.Bot', return_value=self.bot):
             loader.exec_module(self.disco_robo)
 
-        # Additional patches for test module
-        self.patches = [
-            patch('test_discord_commands.datetime', MockDatetime)       # test module's datetime
-        ]
-        
-        # Start all patches
-        for p in self.patches:
-            p.start()
-
-        # Set up other patches
-        self.privileged_patch = patch.object(self.disco_robo, 'is_privileged', return_value=lambda: True)
-        self.privileged_patch.start()
-        self.session_patch = patch.object(self.disco_robo, 'SessionLocal', self.Session)
-        self.session_patch.start()
-        self.config_patch = patch.object(self.disco_robo, 'load_config', return_value=self.mock_config)
-        self.config_patch.start()
-
-        # Create a mock config
-        self.mock_config = {
-            "tracked_teams": [1],  # Cobra Snakes is the default tracked team
-            "privileged_users": [12345],
-            "timezone": "America/Toronto",
-            "channels": {
-                "announcements": None,
-                "bot_commands": None
-            }
-        }
-        
-        # Initialize command iterator
-        self.commands = CommandIterator()
-
-        # Create mock context and bot
-        self.ctx = MockContext()
-        self.bot = MockBot()
-
-        # Set up mock Discord members in the guild
-        test_members = [
-            # First test members
-            ("johna1234", "123456789123456789"),
-            ("sconnor", "223456789123456789"),
-            ("akim", "323456789123456789"),
-            ("mrodriguez", "423456789123456789"),
-            ("echen123", "523456789123456789"),
-            ("staylor", "623456789123456789"),
-            
-            # Winter league members
-            ("mthompson_92", "723456789123456789"),
-            ("ninachen_", "823456789123456789"),
-            ("becca528", "923456789123456789"),
-            ("dparker807", "1023456789123456789"),
-            ("twright054", "1123456789123456789"),
-            ("sophiaa", "1223456789123456789"),
-            ("lc660", "1323456789123456789"),
-            ("emmafisher", "1423456789123456789"),
-            ("ryan_33", "1523456789123456789"),
-            ("isaturner", "1623456789123456789"),
-            ("mhayes", "1723456789123456789"),
-            ("rbennett97", "1823456789123456789")
-        ]
-        
-        for username, user_id in test_members:
-            member = MockMember(id=user_id, name=username)
-            self.ctx.guild.members[username] = member
-            self.bot._users[user_id] = member
-
-        # Import disco-robo with our mock bot
-        import importlib.util
-        spec = importlib.util.spec_from_file_location("disco_robo", "disco-robo.py")
-        self.disco_robo = importlib.util.module_from_spec(spec)
-        
-        # Replace the real bot with our mock
-        with patch('discord.ext.commands.Bot', return_value=self.bot):
-            spec.loader.exec_module(self.disco_robo)
+        # Mock datetime.now() on disco_robo module only, so test games appear as "upcoming"
+        # Patching only the module-level reference keeps the global datetime.datetime intact for SQLAlchemy
+        mock_date = datetime(2025, 10, 1)
+        class MockDatetime(datetime):
+            @classmethod
+            def now(cls, tz=None):
+                return mock_date.replace(tzinfo=tz) if tz else mock_date
+        self.MockDatetime = MockDatetime
+        self.datetime_patch = patch.object(self.disco_robo, 'datetime', MockDatetime)
+        self.datetime_patch.start()
 
         # Set up other patches
         self.privileged_patch = patch.object(self.disco_robo, 'is_privileged', return_value=lambda: True)
@@ -375,9 +298,6 @@ class TestDiscordCommands(unittest.TestCase):
         self.session_patch.stop()
         self.config_patch.stop()
         self.datetime_patch.stop()
-        # Stop all datetime patches
-        for patch in self.patches:
-            patch.stop()
         Base.metadata.drop_all(self.engine)
         self.engine.dispose()
 
@@ -1015,8 +935,8 @@ class TestDiscordCommands(unittest.TestCase):
             self.assertIn("Michael Hayes (mhayes)", roster_text)
             self.assertIn("Robert Bennett (rbennett97)", roster_text)
 
-            # Reset the mock date to before all test games
-            self.assertEqual(datetime.now(), datetime(2025, 10, 1))
+            # Verify the mock date is set to before all test games
+            self.assertEqual(self.disco_robo.datetime.now(), datetime(2025, 10, 1))
 
             # Test schedule
             schedule_command = '!schedule'
@@ -1051,5 +971,112 @@ class TestDiscordCommands(unittest.TestCase):
             # Verify field locations
             self.assertIn("Riverside 1", schedule_text)
             self.assertIn("Riverside 2", schedule_text)
+
+        self.run_async_test(run_test())
+
+    def test_edit_game_change_datetime(self):
+        """Test editing a game's datetime via the bot command"""
+        async def run_test():
+            # Set up teams, players, and a game
+            for command in VALID_COMMANDS[:6]:
+                await self.execute_command(command)
+
+            # Verify the game exists with original datetime
+            with self.Session() as session:
+                game = session.query(Game).first()
+                self.assertIsNotNone(game)
+                original_id = game.id
+                self.assertEqual(game.datetime, datetime(2025, 11, 15, 19, 30))
+
+            # Edit the game's datetime
+            edit_command = f'!edit_game id={original_id} datetime="2025-12-25 20:00"'
+            responses = await self.execute_command(edit_command)
+            self.assertTrue(any("updated successfully" in msg for msg in responses))
+
+            # Verify the datetime was changed
+            with self.Session() as session:
+                game = session.query(Game).filter_by(id=original_id).first()
+                self.assertEqual(game.datetime, datetime(2025, 12, 25, 20, 0))
+                # Other fields unchanged
+                self.assertEqual(game.park, "Riverside Park")
+                self.assertEqual(game.field, 2)
+
+        self.run_async_test(run_test())
+
+    def test_edit_game_change_both_teams(self):
+        """Test editing both away and home teams via the bot command"""
+        async def run_test():
+            # Set up all teams, players, and games
+            for command in VALID_COMMANDS:
+                await self.execute_command(command)
+
+            # Get the first game
+            with self.Session() as session:
+                game = session.query(Game).first()
+                original_id = game.id
+                # Originally: away=Cobra Snakes(1), home=Python Pirates(2)
+                self.assertEqual(game.awayteam.name, "Cobra Snakes")
+                self.assertEqual(game.hometeam.name, "Python Pirates")
+
+            # Edit both teams: swap to Red Dragons(3) away, Green Geckos(4) home
+            edit_command = f'!edit_game id={original_id} away=3 home=4'
+            responses = await self.execute_command(edit_command)
+            self.assertTrue(any("updated successfully" in msg for msg in responses))
+
+            # Verify both teams changed
+            with self.Session() as session:
+                game = session.query(Game).filter_by(id=original_id).first()
+                self.assertEqual(game.awayteam.name, "Red Dragons")
+                self.assertEqual(game.hometeam.name, "Green Geckos")
+                # Other fields unchanged
+                self.assertEqual(game.datetime, datetime(2025, 11, 15, 19, 30))
+                self.assertEqual(game.park, "Riverside Park")
+
+        self.run_async_test(run_test())
+
+    def test_edit_game_nonexistent_team(self):
+        """Test that editing with a nonexistent team ID returns an error"""
+        async def run_test():
+            # Set up teams and a game
+            for command in VALID_COMMANDS[:6]:
+                await self.execute_command(command)
+
+            with self.Session() as session:
+                game = session.query(Game).first()
+                game_id = game.id
+
+            # Try to set away team to nonexistent ID
+            edit_command = f'!edit_game id={game_id} away=9999'
+            responses = await self.execute_command(edit_command, expect_error=True)
+            self.assertTrue(any("9999" in msg for msg in responses))
+            self.assertTrue(any("error" in msg.lower() for msg in responses))
+
+            # Verify game was not modified
+            with self.Session() as session:
+                game = session.query(Game).filter_by(id=game_id).first()
+                self.assertEqual(game.awayteam.name, "Cobra Snakes")
+
+        self.run_async_test(run_test())
+
+    def test_edit_game_bad_datetime_format(self):
+        """Test that a badly formatted datetime returns an error via the bot command"""
+        async def run_test():
+            # Set up teams and a game
+            for command in VALID_COMMANDS[:6]:
+                await self.execute_command(command)
+
+            with self.Session() as session:
+                game = session.query(Game).first()
+                game_id = game.id
+
+            # Try to edit with a bad datetime string
+            edit_command = f'!edit_game id={game_id} datetime="not-a-date"'
+            responses = await self.execute_command(edit_command, expect_error=True)
+            self.assertTrue(any("error" in msg.lower() for msg in responses))
+
+            # Verify game datetime was not modified
+            with self.Session() as session:
+                game = session.query(Game).filter_by(id=game_id).first()
+                self.assertEqual(game.datetime, datetime(2025, 11, 15, 19, 30))
 
         self.run_async_test(run_test())

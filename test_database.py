@@ -5,7 +5,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, joinedload
 from models import Base, Team, Player, Game, Attendance, AttendanceStatus, Genders
 from db_utils import (
-    create_team, create_player, create_game, get_team_roster, get_team_roster_obj,
+    create_team, create_player, create_game, edit_game, get_team_roster, get_team_roster_obj,
     add_player_to_team, get_player, remove_player_from_team, delete_game,
     get_team_games, set_attendance_status, get_game_attendance, get_player_by_discord_id
 )
@@ -409,6 +409,54 @@ class TestDatabase(unittest.TestCase):
         self.assertEqual(attending_count, 2, "Should have 2 players attending")
         self.assertEqual(not_attending_count, 3, "Should have 3 players not attending")
         self.assertEqual(pending_count, 1, "Should have 1 player pending (George)")
+
+    def test_edit_game_change_datetime(self):
+        """Test editing a game's datetime."""
+        game = self.games[0]
+        new_dt = datetime(2025, 12, 25, 20, 0)
+
+        updated = edit_game(self.session, game.id, game_datetime=new_dt)
+
+        self.assertEqual(updated.datetime, new_dt)
+        # Verify other fields unchanged
+        self.assertEqual(updated.awayteam_id, self.cosmic_rays.id)
+        self.assertEqual(updated.hometeam_id, self.disco_ninjas.id)
+        self.assertEqual(updated.park, "Guelph Lake")
+        self.assertEqual(updated.field, 2)
+
+    def test_edit_game_change_both_teams(self):
+        """Test editing both away and home teams at once."""
+        game = self.games[0]
+
+        updated = edit_game(
+            self.session, game.id,
+            away=self.flying_squirrels.id,
+            home=self.ultimate_warriors.id
+        )
+
+        self.assertEqual(updated.awayteam_id, self.flying_squirrels.id)
+        self.assertEqual(updated.hometeam_id, self.ultimate_warriors.id)
+        # Verify other fields unchanged
+        self.assertEqual(updated.datetime, datetime(2025, 10, 29, 18, 0))
+        self.assertEqual(updated.park, "Guelph Lake")
+
+    def test_edit_game_nonexistent_team(self):
+        """Test that editing with a nonexistent team ID raises ValueError."""
+        game = self.games[0]
+
+        with self.assertRaises(ValueError) as cm:
+            edit_game(self.session, game.id, away=9999)
+        self.assertIn("9999", str(cm.exception))
+
+        with self.assertRaises(ValueError) as cm:
+            edit_game(self.session, game.id, home=9999)
+        self.assertIn("9999", str(cm.exception))
+
+    def test_edit_game_bad_datetime_format(self):
+        """Test that a badly formatted datetime raises ValueError."""
+        with self.assertRaises(ValueError) as cm:
+            edit_game(self.session, self.games[0].id, game_datetime="not-a-date")
+        self.assertIn("datetime", str(cm.exception))
 
 if __name__ == '__main__':
     unittest.main()
