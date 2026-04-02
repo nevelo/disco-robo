@@ -1341,7 +1341,8 @@ async def bot_create_game(ctx, *, args):
         date_str = params.get('date', '').strip('"')
         time_str = params.get('time', '').strip('"')
         park = params.get('park', '').strip('"')
-        field = int(params.get('field', 0))
+        field_raw = params.get('field')
+        field = int(field_raw) if field_raw is not None else None
 
         print(f"Creating game: away={away_team_id}, home={home_team_id}, date={date_str}, time={time_str}, park={park}, field={field}", flush=True)
 
@@ -1356,7 +1357,7 @@ async def bot_create_game(ctx, *, args):
             raise ValueError("Missing time")
         if not park:
             raise ValueError("Missing park name")
-        if not field:
+        if field is None:
             raise ValueError("Missing or invalid field number")
 
         # Parse datetime
