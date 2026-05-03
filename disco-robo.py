@@ -655,10 +655,9 @@ async def bot_create_team(ctx, *, args):
     except ValueError as ve:
         await ctx.send(f"Error: {str(ve)}")
     except Exception as e:
-        await ctx.send(f"An unexpected error occurred: {str(e)}")
+        await ctx.send("An unexpected error occurred while creating the team. Please try again.")
         # Log the full error for debugging
         print(f"Error in create_team: {e}", flush=True)
-        await ctx.send(f"Error creating team: {str(e)}")
 
 @bot.command(name="delete_team")
 @log_command()

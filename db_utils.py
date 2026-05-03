@@ -2,6 +2,7 @@ from datetime import datetime
 from typing import Optional, List
 from sqlalchemy.orm import Session
 from sqlalchemy import or_
+from sqlalchemy.exc import IntegrityError
 from models import Team, Player, Game, Attendance, AttendanceStatus, Genders, MessageType
 
 # Constants for unknown/placeholder values
@@ -52,7 +53,14 @@ def create_team(
         away_colour=away_colour
     )
     session.add(team)
-    session.commit()
+    try:
+        session.commit()
+    except IntegrityError as e:
+        session.rollback()
+        error_text = str(getattr(e, "orig", e))
+        if "UNIQUE constraint failed: teams.name, teams.year, teams.season" in error_text:
+            raise ValueError(f"Team '{name}' already exists for {season} {year}") from e
+        raise
     return team
 
 def edit_team(
