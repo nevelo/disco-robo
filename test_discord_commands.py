@@ -896,6 +896,17 @@ class TestDiscordCommands(unittest.TestCase):
                 self.assertIsNotNone(player)
                 self.assertEqual(player.real_first, "John")
                 self.assertEqual(player.real_last, "Rom")
+
+            # Edit discord username and ensure discord_id is updated with it
+            edit_discord_command = '!edit_player id=1 discord="mthompson_92"'
+            responses = await self.execute_command(edit_discord_command)
+            self.assertTrue(any("Player 1 updated successfully" in msg for msg in responses))
+
+            with self.Session() as session:
+                player = session.query(Player).filter_by(id=1).first()
+                self.assertIsNotNone(player)
+                self.assertEqual(player.discord_username, "mthompson_92")
+                self.assertEqual(player.discord_id, "723456789123456789")
         self.run_async_test(run_test())
 
     def test_winter_2026_league(self):

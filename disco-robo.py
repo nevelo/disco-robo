@@ -1220,6 +1220,7 @@ async def bot_edit_team(ctx, *, args):
             # Process each provided field
             for field, value in params.items():
                 value = value.strip('"')
+
                 db_field = field_mapping.get(field)
                 if not db_field:
                     await ctx.send(f"Warning: Field '{field}' is not a valid field name")
@@ -1424,6 +1425,48 @@ async def bot_edit_player(ctx, *, args):
             # Update each provided field using the mapping
             for field, value in params.items():
                 value = value.strip('"')
+
+                # Special handling for Discord identity updates: keep username and ID in sync.
+                if field == 'discord':
+                    discord_param = value.strip()
+
+                    # Allow clearing Discord linkage.
+                    if not discord_param:
+                        player.discord_username = None
+                        player.discord_id = None
+                        continue
+
+                    # Normalize mention format (<@123> or <@!123>) to a plain ID when possible.
+                    normalized_discord_id = discord_param
+                    if discord_param.startswith('<@') and discord_param.endswith('>'):
+                        normalized_discord_id = discord_param[2:-1].lstrip('!')
+
+                    discord_user = None
+                    try:
+                        if ctx.guild:
+                            async for member in ctx.guild.fetch_members():
+                                if (
+                                    member.name == discord_param
+                                    or member.display_name == discord_param
+                                    or str(member.id) == normalized_discord_id
+                                ):
+                                    discord_user = member
+                                    break
+
+                        if not discord_user and normalized_discord_id.isdigit():
+                            discord_user = await bot.fetch_user(int(normalized_discord_id))
+                    except Exception as e:
+                        await ctx.send(f"Warning: Error looking up Discord user: {str(e)}")
+
+                    if discord_user:
+                        player.discord_username = discord_user.name
+                        player.discord_id = str(discord_user.id)
+                    else:
+                        # Preserve provided username text, but avoid stale/mismatched Discord IDs.
+                        player.discord_username = discord_param
+                        player.discord_id = None
+                    continue
+
                 db_field = field_mapping.get(field)
                 if not db_field:
                     await ctx.send(f"Warning: Field '{field}' is not a valid field name")
