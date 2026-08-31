@@ -1,24 +1,28 @@
 #!/bin/bash
 
-ROOT_PATH="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+set -u
 
-PID_FILE="$ROOT_PATH/bot.pid"
+BOT_SERVICE="disco-robo"
 
-# Kill existing process if PID file exists
-if [ -f "$PID_FILE" ]; then
-    OLD_PID=$(cat "$PID_FILE")
-    if ps -p $OLD_PID > /dev/null 2>&1; then
-        echo "Killing existing process: $OLD_PID"
-        kill $OLD_PID
+# Matches "disco-robo.py" whether invoked with an absolute path, a relative
+# path, or as a bare filename, so rogue copies are caught regardless of how
+# they were launched.
+BOT_MATCH_PATTERN='(^|[/ ])disco-robo\.py([ ]|$)'
+
+# `systemctl restart` only touches the process systemd itself tracks as the
+# unit's MainPID. It has no awareness of a copy started manually outside the
+# service (e.g. `python disco-robo.py` from a shell) -- that copy would keep
+# running and double-handle Discord events. Sweep for exactly that case, then
+# let systemd handle stopping/starting its own managed copy atomically.
+MANAGED_PID=$(systemctl show -p MainPID --value "$BOT_SERVICE" 2>/dev/null || echo 0)
+
+for pid in $(pgrep -f -- "$BOT_MATCH_PATTERN"); do
+    if [ "$pid" != "$MANAGED_PID" ]; then
+        echo "Killing rogue disco-robo.py process not managed by systemd (PID $pid)"
+        kill -TERM "$pid" 2>/dev/null || true
         sleep 2
-        kill -9 $OLD_PID 2>/dev/null
+        kill -KILL "$pid" 2>/dev/null || true
     fi
-fi
+done
 
-# Activate venv and start the bot
-. "$ROOT_PATH/venv/bin/activate"
-python "$ROOT_PATH/disco-robo.py" > "$ROOT_PATH/log.file" 2>&1 &
-
-# Save new PID
-echo $! > "$PID_FILE"
-echo "Bot started with PID: $!"
+systemctl restart "$BOT_SERVICE"
