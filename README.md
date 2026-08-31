@@ -94,6 +94,59 @@ python disco-robo.py
 
 The bot will start and connect to Discord. You should see "I'm... alive!" in your bot_commands channel.
 
+#### e) Running as a persistent service (recommended)
+Running the bot directly in a terminal (as in step d) only works while that terminal session is open, and it won't restart automatically after a crash or reboot. For any long-running deployment (e.g. a Raspberry Pi), install it as a `systemd` service instead.
+
+Create `/etc/systemd/system/disco-robo.service`:
+
+```ini
+[Unit]
+Description=disco-robo Discord bot
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=YOUR_USERNAME
+WorkingDirectory=/path/to/disco-robo
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/path/to/disco-robo/venv/bin/python /path/to/disco-robo/disco-robo.py
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+```
+
+Then enable and start it:
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable disco-robo
+sudo systemctl start disco-robo
+sudo systemctl status disco-robo
+```
+
+**Restarting the bot:**
+```bash
+systemctl restart disco-robo
+```
+This is a system-scope unit, so you'll be prompted for your password (via polkit) unless you run it with `sudo`. This is expected and does not require literal root privileges beyond that authentication step.
+
+**Viewing logs:**
+```bash
+journalctl -u disco-robo -f
+```
+
+**Using `launch.sh` to reset the bot:**
+The repo includes [`launch.sh`](launch.sh), which restarts the `disco-robo` service and also sweeps for and kills any rogue copy of the bot that may have been started manually outside of `systemd` (e.g. by running `python disco-robo.py` directly). This prevents a duplicate process from double-handling Discord events. Run it with:
+
+```bash
+bash launch.sh
+```
+
+If you don't need protection against rogue manual copies, a plain `systemctl restart disco-robo` is also sufficient on its own.
+
 ### 2. Building your database
 
 All commands require privileged user permissions and use the format `!command param1=value1 param2="value with spaces"`.

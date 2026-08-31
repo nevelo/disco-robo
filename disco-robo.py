@@ -2,6 +2,7 @@ import os
 import sys
 import asyncio
 import json
+import re
 import shlex
 from datetime import datetime, timedelta
 from typing import List, Optional
@@ -137,6 +138,16 @@ def parse_args(args_str):
             key, value = token.split('=', 1)
             params[key] = value.strip('"')
     return params
+
+def get_command_usage(ctx) -> str:
+    """Extract the 'Usage: ...' hint from a command's docstring, if present.
+
+    Appended to error messages so a user who invokes a command incorrectly
+    sees a concrete example of correct usage instead of just an error string.
+    """
+    doc = (ctx.command.help or "") if ctx.command else ""
+    match = re.search(r"Usage:.*", doc)
+    return match.group(0).strip() if match else ""
 
 # Discord intents
 intents = Intents.default()
@@ -575,7 +586,11 @@ async def bot_set_attendance_status(ctx, *, args):
             )
 
     except ValueError as ve:
-        await ctx.send(f"Error: {str(ve)}")
+        usage = get_command_usage(ctx)
+        msg = f"Error: {str(ve)}"
+        if usage:
+            msg += f"\n{usage}"
+        await ctx.send(msg)
     except Exception as e:
         await ctx.send(f"Error setting attendance: {str(e)}")
         print(f"Error in set_attendance: {e}", flush=True)
@@ -653,7 +668,11 @@ async def bot_create_team(ctx, *, args):
             )
 
     except ValueError as ve:
-        await ctx.send(f"Error: {str(ve)}")
+        usage = get_command_usage(ctx)
+        msg = f"Error: {str(ve)}"
+        if usage:
+            msg += f"\n{usage}"
+        await ctx.send(msg)
     except Exception as e:
         await ctx.send("An unexpected error occurred while creating the team. Please try again.")
         # Log the full error for debugging
@@ -682,7 +701,9 @@ async def bot_delete_team(ctx, *, args):
             team_id = int(params.get('id', 0))
             if team_id <= 0:
                 raise ValueError("Team ID must be a positive number")
-        except ValueError:
+        except ValueError as ve:
+            if "must be" in str(ve):
+                raise ve
             raise ValueError("Team ID must be a valid number")
 
         with SessionLocal() as session:
@@ -719,7 +740,11 @@ async def bot_delete_team(ctx, *, args):
             )
 
     except ValueError as ve:
-        await ctx.send(f"Error: {str(ve)}")
+        usage = get_command_usage(ctx)
+        msg = f"Error: {str(ve)}"
+        if usage:
+            msg += f"\n{usage}"
+        await ctx.send(msg)
     except Exception as e:
         await ctx.send(f"An unexpected error occurred: {str(e)}")
         # Log the full error for debugging
@@ -750,7 +775,9 @@ async def bot_remove_player_from_team(ctx, *, args):
                 raise ValueError("Player ID must be a positive number")
             if team_id <= 0:
                 raise ValueError("Team ID must be a positive number")
-        except ValueError:
+        except ValueError as ve:
+            if "must be a positive number" in str(ve):
+                raise ve
             raise ValueError("Player ID and Team ID must be valid numbers")
 
         with SessionLocal() as session:
@@ -779,7 +806,11 @@ async def bot_remove_player_from_team(ctx, *, args):
             )
 
     except ValueError as ve:
-        await ctx.send(f"Error: {str(ve)}")
+        usage = get_command_usage(ctx)
+        msg = f"Error: {str(ve)}"
+        if usage:
+            msg += f"\n{usage}"
+        await ctx.send(msg)
     except Exception as e:
         await ctx.send(f"An unexpected error occurred: {str(e)}")
         print(f"Error in remove_player_from_team: {e}", flush=True)
@@ -807,7 +838,9 @@ async def bot_delete_player(ctx, *, args):
             player_id = int(params.get('id', 0))
             if player_id <= 0:
                 raise ValueError("Player ID must be a positive number")
-        except ValueError:
+        except ValueError as ve:
+            if "must be" in str(ve):
+                raise ve
             raise ValueError("Player ID must be a valid number")
 
         with SessionLocal() as session:
@@ -844,7 +877,11 @@ async def bot_delete_player(ctx, *, args):
             )
 
     except ValueError as ve:
-        await ctx.send(f"Error: {str(ve)}")
+        usage = get_command_usage(ctx)
+        msg = f"Error: {str(ve)}"
+        if usage:
+            msg += f"\n{usage}"
+        await ctx.send(msg)
     except Exception as e:
         await ctx.send(f"An unexpected error occurred: {str(e)}")
         # Log the full error for debugging
@@ -873,7 +910,9 @@ async def bot_delete_game(ctx, *, args):
             game_id = int(params.get('id', 0))
             if game_id <= 0:
                 raise ValueError("Game ID must be a positive number")
-        except ValueError:
+        except ValueError as ve:
+            if "must be" in str(ve):
+                raise ve
             raise ValueError("Game ID must be a valid number")
 
         with SessionLocal() as session:
@@ -910,7 +949,11 @@ async def bot_delete_game(ctx, *, args):
             )
 
     except ValueError as ve:
-        await ctx.send(f"Error: {str(ve)}")
+        usage = get_command_usage(ctx)
+        msg = f"Error: {str(ve)}"
+        if usage:
+            msg += f"\n{usage}"
+        await ctx.send(msg)
     except Exception as e:
         await ctx.send(f"An unexpected error occurred: {str(e)}")
         # Log the full error for debugging
@@ -952,7 +995,9 @@ async def bot_get_roster(ctx, *, args):
             team_id = int(params.get('id', 0))
             if team_id <= 0:
                 raise ValueError("Team ID must be a positive number")
-        except ValueError:
+        except ValueError as ve:
+            if "must be" in str(ve):
+                raise ve
             raise ValueError("Team ID must be a valid number")
 
         with SessionLocal() as session:
@@ -1011,7 +1056,11 @@ async def bot_get_roster(ctx, *, args):
             await ctx.send("```\n" + "\n".join(lines) + "\n```")
 
     except ValueError as ve:
-        await ctx.send(f"Error: {str(ve)}")
+        usage = get_command_usage(ctx)
+        msg = f"Error: {str(ve)}"
+        if usage:
+            msg += f"\n{usage}"
+        await ctx.send(msg)
     except Exception as e:
         import traceback
         error_info = traceback.extract_tb(e.__traceback__)[-1]
@@ -1040,7 +1089,9 @@ async def bot_get_attendance(ctx, *, args):
             game_id = int(params.get('game', 0))
             if game_id <= 0:
                 raise ValueError("Game ID must be a positive number")
-        except ValueError:
+        except ValueError as ve:
+            if "must be" in str(ve):
+                raise ve
             raise ValueError("Game ID must be a valid number")
 
         with SessionLocal() as session:
@@ -1082,7 +1133,11 @@ async def bot_get_attendance(ctx, *, args):
             await ctx.send("```\n" + "\n".join(lines) + "\n```")
 
     except ValueError as ve:
-        await ctx.send(f"Error: {str(ve)}")
+        usage = get_command_usage(ctx)
+        msg = f"Error: {str(ve)}"
+        if usage:
+            msg += f"\n{usage}"
+        await ctx.send(msg)
     except Exception as e:
         await ctx.send(f"An unexpected error occurred: {str(e)}")
         # Log the full error for debugging
@@ -1102,7 +1157,7 @@ async def bot_create_player(ctx, *, args):
 #           team        Integer     team_ID         Home team's unique integer ID.
 # --------------------------------------
 # !create_player lastname="lastname" firstname="firstname" gender=(m OR f) (with optional discord_ID="discord_ID")  (returns: player ID)
-    """Create a new player. Usage: !create_player lastname="Smith" firstname="John" gender=(m|f) [discord_ID="123456789"]"""
+    """Create a new player. Usage: !create_player first="John" last="Smith" gender=(m|f) [discord="123456789"]"""
     try:
         if not args:
             await ctx.send("Error: Missing arguments. Usage: !create_player first=\"John\" last=\"Smith\" gender=(m|f) [discord=\"123456789\"]")
@@ -1167,7 +1222,11 @@ async def bot_create_player(ctx, *, args):
                 await ctx.send(f"Player created successfully! Player ID: {player.id}\nDiscord username stored but user not found: {discord_param}")
 
     except Exception as e:
-        await ctx.send(f"Error creating player: {str(e)}")
+        usage = get_command_usage(ctx)
+        msg = f"Error creating player: {str(e)}"
+        if usage:
+            msg += f"\n{usage}"
+        await ctx.send(msg)
         # Log the full error for debugging
         print(f"Error in create_player: {e}", flush=True)
 
@@ -1269,7 +1328,11 @@ async def bot_edit_team(ctx, *, args):
                 await ctx.send("No valid fields provided for update")
 
     except ValueError as ve:
-        await ctx.send(f"Error: {str(ve)}")
+        usage = get_command_usage(ctx)
+        error_msg = f"Error: {str(ve)}"
+        if usage:
+            error_msg += f"\n{usage}"
+        await ctx.send(error_msg)
     except Exception as e:
         await ctx.send(f"An unexpected error occurred: {str(e)}")
         print(f"Error in edit_team: {e}", flush=True)
@@ -1311,7 +1374,11 @@ async def bot_add_player(ctx, *, args):
             await ctx.send(f"Player {player_id} ({player.real_first} {player.real_last}) added to team {team_id} ({team_name})")
 
     except Exception as e:
-        await ctx.send(f"Error adding player to team: {str(e)}")
+        usage = get_command_usage(ctx)
+        msg = f"Error adding player to team: {str(e)}"
+        if usage:
+            msg += f"\n{usage}"
+        await ctx.send(msg)
 
 @bot.command(name="create_game")
 @log_command()
@@ -1330,6 +1397,7 @@ async def bot_create_game(ctx, *, args):
 #           park        String      park            Name of the park where the game will be held.
 #           field       Integer     field           Field number at the park.
 # --------------------------------------
+    """Create a new game. Usage: !create_game away=<team_id> home=<team_id> date="YYYY-MM-DD" time="HH:MM" park="Park Name" field=<num>"""
     try:
 
         # Parse arguments
@@ -1381,7 +1449,11 @@ async def bot_create_game(ctx, *, args):
             await ctx.send(f"Game created successfully! Game ID: {game.id}")
 
     except Exception as e:
-        await ctx.send(f"Error creating game: {str(e)}")
+        usage = get_command_usage(ctx)
+        msg = f"Error creating game: {str(e)}"
+        if usage:
+            msg += f"\n{usage}"
+        await ctx.send(msg)
 
 @bot.command(name="edit_player")
 @log_command()
@@ -1487,7 +1559,11 @@ async def bot_edit_player(ctx, *, args):
             await ctx.send(f"Player {player_id} updated successfully")
 
     except Exception as e:
-        await ctx.send(f"Error updating player: {str(e)}")
+        usage = get_command_usage(ctx)
+        msg = f"Error updating player: {str(e)}"
+        if usage:
+            msg += f"\n{usage}"
+        await ctx.send(msg)
 
 @bot.command(name="track")
 @log_command()
@@ -1534,7 +1610,11 @@ async def bot_track_team(ctx, team_id: int):
         await ctx.send(f"✅ Now tracking team {team_id}: {team_name} ({team_season} {team_year})")
         
     except ValueError as ve:
-        await ctx.send(f"Error: {str(ve)}")
+        usage = get_command_usage(ctx)
+        msg = f"Error: {str(ve)}"
+        if usage:
+            msg += f"\n{usage}"
+        await ctx.send(msg)
     except Exception as e:
         await ctx.send(f"An unexpected error occurred: {str(e)}")
         print(f"Error in track_team: {e}", flush=True)
@@ -1575,7 +1655,11 @@ async def bot_edit_game(ctx, *, args):
             await ctx.send(f"Game {game_id} updated successfully")
 
     except Exception as e:
-        await ctx.send(f"Error updating game: {str(e)}")
+        usage = get_command_usage(ctx)
+        msg = f"Error updating game: {str(e)}"
+        if usage:
+            msg += f"\n{usage}"
+        await ctx.send(msg)
 
 @bot.command(name="list_teams")
 @log_command()
@@ -1821,7 +1905,11 @@ async def bot_set_message_id(ctx, *, args):
             )
 
     except ValueError as ve:
-        await ctx.send(f"Error: {str(ve)}")
+        usage = get_command_usage(ctx)
+        msg = f"Error: {str(ve)}"
+        if usage:
+            msg += f"\n{usage}"
+        await ctx.send(msg)
     except Exception as e:
         await ctx.send(f"An unexpected error occurred: {str(e)}")
         print(f"Error in set_message_id: {e}", flush=True)
@@ -1937,9 +2025,17 @@ async def on_command_error(ctx, error):
         # We already send a custom message in is_privileged(), so just return
         return
     elif isinstance(error, commands.MissingRequiredArgument):
-        await ctx.send(f"Error: Missing required argument: {error.param}")
+        usage = get_command_usage(ctx)
+        msg = f"Error: Missing required argument: {error.param}"
+        if usage:
+            msg += f"\n{usage}"
+        await ctx.send(msg)
     elif isinstance(error, commands.BadArgument):
-        await ctx.send(f"Error: Bad argument: {str(error)}")
+        usage = get_command_usage(ctx)
+        msg = f"Error: Bad argument: {str(error)}"
+        if usage:
+            msg += f"\n{usage}"
+        await ctx.send(msg)
     else:
         # Log unexpected errors
         print(f"Unexpected error: {error}", flush=True)
